@@ -1,0 +1,23 @@
+{
+  "name": "cc-manager",
+  "version": "1.0.0",
+  "description": "Cross-platform Claude Code configuration switching tool",
+  "main": "cc-manager.js",
+  "bin": {
+    "cc-manager": "./cc-manager.js"
+  },
+  "scripts": {
+    "test": "node cc-manager.js help"
+  },
+  "keywords": [
+    "claude",
+    "cli",
+    "config",
+    "environment"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
