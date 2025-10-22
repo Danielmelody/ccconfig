@@ -6,7 +6,7 @@ const os = require('os');
 const readline = require('readline');
 
 // Configuration file paths
-const CONFIG_DIR = path.join(os.homedir(), '.config', 'claude-code');
+const CONFIG_DIR = path.join(os.homedir(), '.config', 'ccconfig');
 const PROFILES_FILE = path.join(CONFIG_DIR, 'profiles.json');
 const CLAUDE_SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 const ENV_FILE = path.join(CONFIG_DIR, 'current.env');

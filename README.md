@@ -65,9 +65,9 @@ Configure once by adding to your Shell startup files:
 **Fish** (`~/.config/fish/config.fish`):
 ```fish
 # Load Claude Code environment variables
-set -l claude_env ~/.config/claude-code/current.env
-if test -f $claude_env
-    for line in (cat $claude_env)
+set -l ccconfig_env ~/.config/ccconfig/current.env
+if test -f $ccconfig_env
+    for line in (cat $ccconfig_env)
         set -l parts (string split '=' $line)
         set -gx $parts[1] $parts[2]
     end
@@ -77,25 +77,25 @@ end
 **Bash** (`~/.bashrc`):
 ```bash
 # Load Claude Code environment variables
-if [ -f ~/.config/claude-code/current.env ]; then
-    export $(grep -v '^#' ~/.config/claude-code/current.env | xargs)
+if [ -f ~/.config/ccconfig/current.env ]; then
+    export $(grep -v '^#' ~/.config/ccconfig/current.env | xargs)
 fi
 ```
 
 **Zsh** (`~/.zshrc`):
 ```zsh
 # Load Claude Code environment variables
-if [ -f ~/.config/claude-code/current.env ]; then
-    export $(grep -v '^#' ~/.config/claude-code/current.env | xargs)
+if [ -f ~/.config/ccconfig/current.env ]; then
+    export $(grep -v '^#' ~/.config/ccconfig/current.env | xargs)
 fi
 ```
 
 **PowerShell** (`$PROFILE`):
 ```powershell
 # Load Claude Code environment variables
-$claudeEnv = "$env:USERPROFILE\.config\claude-code\current.env"
-if (Test-Path $claudeEnv) {
-    Get-Content $claudeEnv | ForEach-Object {
+$cconfigEnv = "$env:USERPROFILE\.config\ccconfig\current.env"
+if (Test-Path $cconfigEnv) {
+    Get-Content $cconfigEnv | ForEach-Object {
         if ($_ -match '^([^=]+)=(.*)$') {
             [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
         }
@@ -161,14 +161,14 @@ ccconfig env dotenv > .env
 
 ## Configuration File Locations
 
-- **Configuration List**: `~/.config/claude-code/profiles.json`
+- **Configuration List**: `~/.config/ccconfig/profiles.json`
 - **Claude Settings**: `~/.claude/settings.json`
-- **Environment Variables File**: `~/.config/claude-code/current.env`
-- **Mode Settings**: `~/.config/claude-code/mode`
+- **Environment Variables File**: `~/.config/ccconfig/current.env`
+- **Mode Settings**: `~/.config/ccconfig/mode`
 
 ## Configuration Example
 
-`~/.config/claude-code/profiles.json`:
+`~/.config/ccconfig/profiles.json`:
 
 ```json
 {
@@ -228,17 +228,17 @@ source .env
 
 ```bash
 # Backup configuration
-cp ~/.config/claude-code/profiles.json ~/backup/claude-profiles.json
+cp ~/.config/ccconfig/profiles.json ~/backup/ccconfig-profiles.json
 
 # Sync to new machine
-scp ~/backup/claude-profiles.json new-machine:~/.config/claude-code/
+scp ~/backup/ccconfig-profiles.json new-machine:~/.config/ccconfig/
 
 # Or use version control (be careful with security!)
-cd ~/.config/claude-code
+cd ~/.config/ccconfig
 git init
 echo "*.env" >> .gitignore
 git add profiles.json
-git commit -m "Claude Code profiles"
+git commit -m "ccconfig profiles"
 ```
 
 ## Troubleshooting
@@ -251,8 +251,8 @@ git commit -m "Claude Code profiles"
 3. Check the `env` field in `~/.claude/settings.json`
 
 **ENV Mode**:
-1. Check environment variables file: `cat ~/.config/claude-code/current.env`
-2. Confirm Shell configuration is correct: `cat ~/.bashrc | grep claude`
+1. Check environment variables file: `cat ~/.config/ccconfig/current.env`
+2. Confirm Shell configuration is correct: `cat ~/.bashrc | grep ccconfig`
 3. Restart Shell or use `eval $(ccconfig env bash)`
 4. Check process environment variables: `ccconfig current`
 
@@ -269,9 +269,9 @@ ccconfig use work          # Reapply configuration
 
 ```bash
 # Fix configuration file permissions
-chmod 600 ~/.config/claude-code/profiles.json
+chmod 600 ~/.config/ccconfig/profiles.json
 chmod 600 ~/.claude/settings.json
-chmod 600 ~/.config/claude-code/current.env
+chmod 600 ~/.config/ccconfig/current.env
 ```
 
 ## Security Considerations
@@ -306,7 +306,7 @@ Using both simultaneously may cause confusion.
 **Q: How to use on Windows?**
 
 A: Fully supported on Windows:
-- Configuration file location: `%USERPROFILE%\.config\claude-code\`
+- Configuration file location: `%USERPROFILE%\.config\ccconfig\`
 - Settings mode requires no additional configuration
 - ENV mode uses PowerShell configuration
 
@@ -321,7 +321,7 @@ A:
 A: Yes, but be careful:
 ```bash
 # Export configuration structure (excluding API keys)
-cat ~/.config/claude-code/profiles.json | \
+cat ~/.config/ccconfig/profiles.json | \
   jq '.profiles | map_values({baseUrl, description})' > team-config.json
 
 # Team members manually add their own API keys after importing
