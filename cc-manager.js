@@ -306,7 +306,7 @@ function list() {
     console.log('No configurations found.');
     console.log('');
     console.log('Add your first configuration:');
-    console.log('  cc-manager add work');
+    console.log('  ccconfig add work');
     console.log('');
     console.log(
         'The command will guide you through configuration step by step.');
@@ -423,7 +423,7 @@ async function add(name) {
   console.log(`✓ Configuration '${name}' added`);
   console.log('');
   console.log('Run the following command to activate:');
-  console.log(`  cc-manager use ${name}`);
+  console.log(`  ccconfig use ${name}`);
   console.log('');
   console.log('Saved environment variables:');
   const safePrint = (key, value, mask = true) => {
@@ -447,7 +447,7 @@ async function add(name) {
   console.log(
       'You can edit this file directly to further customize the profile:');
   console.log(`  vim ${PROFILES_FILE}`);
-  console.log('Or run cc-manager edit to open it with your preferred editor');
+  console.log('Or run ccconfig edit to open it with your preferred editor');
 }
 
 /**
@@ -456,7 +456,7 @@ async function add(name) {
 function remove(name) {
   if (!name) {
     console.error('Error: Missing configuration name');
-    console.error('Usage: cc-manager remove <name>');
+    console.error('Usage: ccconfig remove <name>');
     process.exit(1);
   }
 
@@ -484,27 +484,27 @@ function detectShellCommand() {
   const shellPath = (process.env.SHELL || '').toLowerCase();
 
   if (process.env.FISH_VERSION || shellPath.includes('fish')) {
-    return {shell: 'fish', command: 'cc-manager env fish | source'};
+    return {shell: 'fish', command: 'ccconfig env fish | source'};
   }
 
   if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
       shellPath.includes('zsh')) {
-    return {shell: 'zsh', command: 'eval $(cc-manager env bash)'};
+    return {shell: 'zsh', command: 'eval $(ccconfig env bash)'};
   }
 
   if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
       shellPath.includes('pwsh') || shellPath.includes('powershell')) {
-    return {shell: 'PowerShell', command: 'cc-manager env pwsh | iex'};
+    return {shell: 'PowerShell', command: 'ccconfig env pwsh | iex'};
   }
 
   if (shellPath.includes('bash')) {
-    return {shell: 'bash', command: 'eval $(cc-manager env bash)'};
+    return {shell: 'bash', command: 'eval $(ccconfig env bash)'};
   }
 
   if (process.platform === 'win32') {
     const comSpec = (process.env.ComSpec || '').toLowerCase();
     if (comSpec.includes('powershell')) {
-      return {shell: 'PowerShell', command: 'cc-manager env pwsh | iex'};
+      return {shell: 'PowerShell', command: 'ccconfig env pwsh | iex'};
     }
   }
 
@@ -520,13 +520,13 @@ function use(name) {
   if (!profiles || !profiles.profiles ||
       Object.keys(profiles.profiles).length === 0) {
     console.error('Error: No configurations found');
-    console.error('Please add a configuration first: cc-manager add <name>');
+    console.error('Please add a configuration first: ccconfig add <name>');
     process.exit(1);
   }
 
   if (!profiles.profiles[name]) {
     console.error(`Error: Configuration '${name}' does not exist`);
-    console.error('Run cc-manager list to see available configurations');
+    console.error('Run ccconfig list to see available configurations');
     process.exit(1);
   }
 
@@ -571,9 +571,9 @@ function use(name) {
     console.log('');
     const shellSuggestion = detectShellCommand();
     const applyCommands = [
-      {command: 'eval $(cc-manager env bash)', note: '# Bash/Zsh'},
-      {command: 'cc-manager env fish | source', note: '# Fish'},
-      {command: 'cc-manager env pwsh | iex', note: '# PowerShell'}
+      {command: 'eval $(ccconfig env bash)', note: '# Bash/Zsh'},
+      {command: 'ccconfig env fish | source', note: '# Fish'},
+      {command: 'ccconfig env pwsh | iex', note: '# PowerShell'}
     ];
 
     console.log('Apply immediately in current Shell (optional):');
@@ -701,7 +701,7 @@ function current(showSecret = false) {
 function edit() {
   if (!fs.existsSync(PROFILES_FILE)) {
     console.error('Error: Configuration file does not exist');
-    console.error('Please add a configuration first: cc-manager add <name>');
+    console.error('Please add a configuration first: ccconfig add <name>');
     process.exit(1);
   }
 
@@ -736,8 +736,8 @@ function mode(newMode) {
     }
     console.log('');
     console.log('Switch modes:');
-    console.log('  cc-manager mode settings');
-    console.log('  cc-manager mode env');
+    console.log('  ccconfig mode settings');
+    console.log('  ccconfig mode env');
     return;
   }
 
@@ -774,7 +774,7 @@ function env(format = 'bash') {
     console.error(
         'Error: No available environment variable configuration found');
     console.error(
-        'Please run cc-manager use <name> to select a configuration first');
+        'Please run ccconfig use <name> to select a configuration first');
     process.exit(1);
   }
 
@@ -830,7 +830,7 @@ function help() {
       '  settings - Directly modify ~/.claude/settings.json (no Shell config needed)');
   console.log('');
   console.log('Usage:');
-  console.log('  cc-manager [command] [options]');
+  console.log('  ccconfig [command] [options]');
   console.log('');
   console.log('Global Options:');
   console.log(
@@ -893,7 +893,7 @@ async function main() {
     case 'use':
       if (!filteredArgs[1]) {
         console.error('Error: Missing configuration name');
-        console.error('Usage: cc-manager use <name>');
+        console.error('Usage: ccconfig use <name>');
         process.exit(1);
       }
       use(filteredArgs[1]);
@@ -922,14 +922,14 @@ async function main() {
         list();
       } else {
         console.error(`Error: Unknown command '${command}'`);
-        console.error('Run cc-manager --help to see help');
+        console.error('Run ccconfig --help to see help');
         process.exit(1);
       }
   }
 }
 
 function showVersion() {
-  console.log(`cc-manager version ${PACKAGE_VERSION}`);
+  console.log(`ccconfig version ${PACKAGE_VERSION}`);
 }
 
 (async () => {

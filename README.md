@@ -5,10 +5,10 @@ Quickly switch between different claude-code providers
 
 ```bash
 # Switch to work configuration during work hours
-cc-manager use company
+ccconfig use company
 
 # Switch back to personal configuration after work
-cc-manager use personal
+ccconfig use personal
 ```
 
 ## Quick Start
@@ -17,7 +17,7 @@ cc-manager use personal
 
 ```bash
 # Install from npm (recommended)
-npm install -g @danielhu/cc-manager
+npm install -g ccconfig
 ```
 
 ### ENV Mode (Recommended, Default)
@@ -26,7 +26,7 @@ npm install -g @danielhu/cc-manager
 # 1. Configure Shell auto-loading (see below)
 
 # 2. Add configuration (interactive mode)
-cc-manager add
+ccconfig add
 # Follow the prompts to enter:
 # - Name
 # - ANTHROPIC_BASE_URL
@@ -35,24 +35,24 @@ cc-manager add
 # - Description
 
 # 3. Switch configuration
-cc-manager use work
+ccconfig use work
 
 # 4. Restart Shell or apply immediately
-eval $(cc-manager env bash)  # or use the detected command from output
+eval $(ccconfig env bash)  # or use the detected command from output
 ```
 
 ### Settings Mode
 
 ```bash
 # 1. Switch to settings mode
-cc-manager mode settings
+ccconfig mode settings
 
 # 2. Add configuration (interactive mode)
-cc-manager add
+ccconfig add
 # Follow the prompts to configure
 
 # 3. Switch configuration
-cc-manager use work
+ccconfig use work
 
 # 4. Restart Claude Code
 # Configuration is now active!
@@ -109,54 +109,54 @@ if (Test-Path $claudeEnv) {
 
 ```bash
 # Run without command (defaults to list)
-cc-manager
+ccconfig
 
 # List all configurations
-cc-manager list
+ccconfig list
 
 # Add new configuration (interactive mode only, auto-creates config file on first use)
-cc-manager add
+ccconfig add
 
 # Switch configuration
-cc-manager use <name>
+ccconfig use <name>
 
 # Remove configuration
-cc-manager remove <name>
+ccconfig remove <name>
 
 # View current status (shows all configuration sources)
-cc-manager current
-cc-manager current --show-secret  # Show full token
+ccconfig current
+ccconfig current --show-secret  # Show full token
 
 # Show configuration file path
-cc-manager edit
+ccconfig edit
 
 # View version
-cc-manager --version  # or -V
+ccconfig --version  # or -V
 ```
 
 ### Mode Management
 
 ```bash
 # View current mode
-cc-manager mode
+ccconfig mode
 
 # Switch to settings mode
-cc-manager mode settings
+ccconfig mode settings
 
 # Switch to env mode
-cc-manager mode env
+ccconfig mode env
 ```
 
 ### ENV Mode Specific
 
 ```bash
 # Apply immediately in current Shell (env mode)
-eval $(cc-manager env bash)      # Bash/Zsh
-cc-manager env fish | source     # Fish
-cc-manager env pwsh | iex        # PowerShell
+eval $(ccconfig env bash)      # Bash/Zsh
+ccconfig env fish | source     # Fish
+ccconfig env pwsh | iex        # PowerShell
 
 # Output .env format
-cc-manager env dotenv > .env
+ccconfig env dotenv > .env
 ```
 
 ## Configuration File Locations
@@ -199,15 +199,15 @@ cc-manager env dotenv > .env
 
 ```bash
 # Add to ~/.bashrc or ~/.zshrc
-alias ccs='cc-manager'
-alias ccs-use='cc-manager use'
-alias ccs-list='cc-manager list'
-alias ccs-current='cc-manager current'
+alias ccs='ccconfig'
+alias ccs-use='ccconfig use'
+alias ccs-list='ccconfig list'
+alias ccs-current='ccconfig current'
 
 # Fish (~/.config/fish/config.fish)
-abbr ccs 'cc-manager'
-abbr ccs-use 'cc-manager use'
-abbr ccs-list 'cc-manager list'
+abbr ccs 'ccconfig'
+abbr ccs-use 'ccconfig use'
+abbr ccs-list 'ccconfig list'
 ```
 
 ### Project-Level Configuration
@@ -217,8 +217,8 @@ For specific projects, you can export .env files:
 ```bash
 # Export to project directory
 cd my-project
-cc-manager use project-config
-cc-manager env dotenv > .env
+ccconfig use project-config
+ccconfig env dotenv > .env
 
 # Use project configuration
 source .env
@@ -246,23 +246,23 @@ git commit -m "Claude Code profiles"
 ### Configuration Not Taking Effect
 
 **Settings Mode**:
-1. Check if configuration is written correctly: `cc-manager current`
+1. Check if configuration is written correctly: `ccconfig current`
 2. Confirm Claude Code has been restarted
 3. Check the `env` field in `~/.claude/settings.json`
 
 **ENV Mode**:
 1. Check environment variables file: `cat ~/.config/claude-code/current.env`
 2. Confirm Shell configuration is correct: `cat ~/.bashrc | grep claude`
-3. Restart Shell or use `eval $(cc-manager env bash)`
-4. Check process environment variables: `cc-manager current`
+3. Restart Shell or use `eval $(ccconfig env bash)`
+4. Check process environment variables: `ccconfig current`
 
 ### Configuration Lost After Mode Switch
 
 Switching modes does not affect saved configurations, only changes how configurations are applied. After switching, you need to `use` once more:
 
 ```bash
-cc-manager mode env          # Switch to env mode
-cc-manager use work          # Reapply configuration
+ccconfig mode env          # Switch to env mode
+ccconfig use work          # Reapply configuration
 ```
 
 ### File Permission Issues
@@ -333,7 +333,7 @@ cat ~/.config/claude-code/profiles.json | \
 
 ```
 .
-├── cc-manager.js         # Core script
+├── ccconfig.js         # Core script
 ├── package.json             # npm configuration
 ├── README.md                # This document
 └── .gitignore               # Git ignore file
@@ -343,24 +343,24 @@ cat ~/.config/claude-code/profiles.json | \
 
 ```bash
 # Test version output
-node cc-manager.js --version
+node ccconfig.js --version
 
 # Test adding configuration (interactive only)
-node cc-manager.js add
+node ccconfig.js add
 
 # Test listing
-node cc-manager.js list
+node ccconfig.js list
 
 # Test switching
-node cc-manager.js use test
+node ccconfig.js use test
 
 # Test status viewing
-node cc-manager.js current
-node cc-manager.js current --show-secret
+node ccconfig.js current
+node ccconfig.js current --show-secret
 
 # Test mode switching
-node cc-manager.js mode
-node cc-manager.js mode env
+node ccconfig.js mode
+node ccconfig.js mode env
 ```
 
 ## License

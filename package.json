@@ -1,10 +1,10 @@
 {
-  "name": "@danielhu/cc-manager",
+  "name": "ccconfig",
   "version": "1.0.0",
   "description": "Cross-platform Claude Code configuration switching tool",
   "main": "cc-manager.js",
   "bin": {
-    "cc-manager": "cc-manager.js"
+    "ccconfig": "cc-manager.js"
   },
   "scripts": {
     "test": "node cc-manager.js --version"
