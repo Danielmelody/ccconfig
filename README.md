@@ -9,6 +9,9 @@ ccconfig use company
 
 # Switch back to personal configuration after work
 ccconfig use personal
+
+# Permanently write to shell config (no need to eval or source each time)
+ccconfig use personal --permanent  # or use -p for short
 ```
 
 ## Quick Start
@@ -37,11 +40,26 @@ ccconfig add
 # 3. Switch configuration
 ccconfig use work
 
-# 4. Restart Shell or apply immediately
+# 4. Apply immediately (choose one method):
+# Method A: Temporary (only in current shell)
 eval $(ccconfig env bash)  # or use the detected command from output
+
+# Method B: Permanent (write to shell config file)
+ccconfig use work --permanent  # or -p for short
+# Automatically detects and modifies ~/.bashrc, ~/.zshrc, or config.fish
 ```
 
 ### Settings Mode
+
+Settings Mode directly modifies `~/.claude/settings.json` file, which is Claude Code's native configuration file. This mode is suitable when you don't want to configure shell scripts.
+
+**How it works:**
+- Writes environment variables directly into `~/.claude/settings.json` under the `env` field
+- Claude Code reads these settings on startup
+- No shell configuration required
+- Requires Claude Code restart after each switch
+
+**Setup:**
 
 ```bash
 # 1. Switch to settings mode
@@ -49,7 +67,12 @@ ccconfig mode settings
 
 # 2. Add configuration (interactive mode)
 ccconfig add
-# Follow the prompts to configure
+# Follow the prompts to enter:
+# - Name
+# - ANTHROPIC_BASE_URL
+# - ANTHROPIC_AUTH_TOKEN
+# - ANTHROPIC_API_KEY
+# - Description
 
 # 3. Switch configuration
 ccconfig use work
@@ -58,9 +81,52 @@ ccconfig use work
 # Configuration is now active!
 ```
 
+**Verification:**
+```bash
+# Check current configuration
+ccconfig current
+
+# View the settings file directly
+cat ~/.claude/settings.json
+```
+
 #### ENV Mode Shell Configuration
 
-Configure once by adding to your Shell startup files:
+You have two options to configure shell environment:
+
+**Option 1: Automatic (Recommended)**
+
+Use the `-p/--permanent` flag to automatically write to your shell config:
+
+```bash
+# Automatically detects your shell and writes to the appropriate config file
+ccconfig use <profile> --permanent
+
+# You will be prompted with:
+# - Warning about modifying shell config
+# - Target file path
+# - Content preview
+# - Confirmation prompt (yes/no)
+
+# This will modify:
+# - Fish: ~/.config/fish/config.fish
+# - Bash: ~/.bashrc
+# - Zsh: ~/.zshrc
+# - PowerShell: ~/.config/powershell/profile.ps1
+```
+
+The tool will add a marked block between `# >>> ccconfig >>>` and `# <<< ccconfig <<<` markers, making it easy to identify and update later.
+
+**Safety Features:**
+- **User confirmation required**: You will be prompted before any file is modified
+- **Content preview**: Shows exactly what will be written
+- **Clear explanation**: Explains what changes will be made
+- **Non-destructive**: Existing content is preserved, only the ccconfig block is updated
+- **Interactive only**: Requires interactive terminal to prevent accidental modifications
+
+**Option 2: Manual Configuration**
+
+If you prefer to manually configure, add the following to your shell startup files:
 
 **Fish** (`~/.config/fish/config.fish`):
 ```fish
@@ -68,8 +134,10 @@ Configure once by adding to your Shell startup files:
 set -l ccconfig_env ~/.config/ccconfig/current.env
 if test -f $ccconfig_env
     for line in (cat $ccconfig_env)
-        set -l parts (string split '=' $line)
-        set -gx $parts[1] $parts[2]
+        set -l parts (string split -m1 '=' $line)
+        if test (count $parts) -eq 2
+            set -gx $parts[1] $parts[2]
+        end
     end
 end
 ```
@@ -78,7 +146,9 @@ end
 ```bash
 # Load Claude Code environment variables
 if [ -f ~/.config/ccconfig/current.env ]; then
-    export $(grep -v '^#' ~/.config/ccconfig/current.env | xargs)
+    set -a
+    . ~/.config/ccconfig/current.env
+    set +a
 fi
 ```
 
@@ -86,7 +156,9 @@ fi
 ```zsh
 # Load Claude Code environment variables
 if [ -f ~/.config/ccconfig/current.env ]; then
-    export $(grep -v '^#' ~/.config/ccconfig/current.env | xargs)
+    set -a
+    . ~/.config/ccconfig/current.env
+    set +a
 fi
 ```
 
@@ -102,6 +174,8 @@ if (Test-Path $cconfigEnv) {
     }
 }
 ```
+
+**Note**: Manual configuration allows you to switch profiles dynamically by changing `current.env`, while `-p/--permanent` writes the values directly into the shell config.
 
 ## Command Reference
 
@@ -120,12 +194,15 @@ ccconfig add
 # Switch configuration
 ccconfig use <name>
 
+# Switch configuration and write permanently to shell config
+ccconfig use <name> --permanent  # or -p
+
 # Remove configuration
 ccconfig remove <name>
 
 # View current status (shows all configuration sources)
 ccconfig current
-ccconfig current --show-secret  # Show full token
+ccconfig current --show-secret  # or -s to show full token
 
 # Show configuration file path
 ccconfig edit
@@ -133,6 +210,17 @@ ccconfig edit
 # View version
 ccconfig --version  # or -V
 ```
+
+### Command Options
+
+All flags support both long and short forms:
+
+| Long Form | Short Form | Description |
+|-----------|------------|-------------|
+| `--help` | `-h` | Display help information |
+| `--version` | `-V` | Display version information |
+| `--permanent` | `-p` | Write permanently to shell config (use command) |
+| `--show-secret` | `-s` | Show full token (current command) |
 
 ### Mode Management
 
@@ -246,15 +334,56 @@ git commit -m "ccconfig profiles"
 ### Configuration Not Taking Effect
 
 **Settings Mode**:
-1. Check if configuration is written correctly: `ccconfig current`
-2. Confirm Claude Code has been restarted
-3. Check the `env` field in `~/.claude/settings.json`
+1. **Check configuration is written correctly**: 
+   ```bash
+   ccconfig current
+   # Look at section 【1】~/.claude/settings.json
+   ```
+2. **Verify settings.json directly**:
+   ```bash
+   cat ~/.claude/settings.json | grep -A 5 '"env"'
+   ```
+3. **Confirm Claude Code has been restarted**:
+   - Completely quit Claude Code (not just close window)
+   - Restart the application
+4. **Check the `env` field** in `~/.claude/settings.json`:
+   ```json
+   {
+     "env": {
+       "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+       "ANTHROPIC_AUTH_TOKEN": "sk-...",
+       "ANTHROPIC_API_KEY": "sk-..."
+     }
+   }
+   ```
 
 **ENV Mode**:
-1. Check environment variables file: `cat ~/.config/ccconfig/current.env`
-2. Confirm Shell configuration is correct: `cat ~/.bashrc | grep ccconfig`
-3. Restart Shell or use `eval $(ccconfig env bash)`
-4. Check process environment variables: `ccconfig current`
+1. **Check environment variables file**: 
+   ```bash
+   cat ~/.config/ccconfig/current.env
+   ```
+2. **If using --permanent flag**:
+   - The tool will show a warning and ask for confirmation before modifying files
+   - Check your shell config file has ccconfig block:
+     ```bash
+     # For bash/zsh
+     cat ~/.bashrc | grep -A 5 "ccconfig"
+     # For fish
+     cat ~/.config/fish/config.fish | grep -A 5 "ccconfig"
+     ```
+   - Restart shell or run: `source ~/.bashrc` (or equivalent for your shell)
+   - Note: You can also use `-p` as a short form of `--permanent`
+   - To cancel the operation, type "no" when prompted
+   
+3. **If using manual configuration or eval command**:
+   - Confirm Shell configuration is correct: `cat ~/.bashrc | grep ccconfig`
+   - Restart Shell or use `eval $(ccconfig env bash)`
+   
+4. **Check process environment variables**: 
+   ```bash
+   ccconfig current
+   # Look at section 【3】Current Process Environment Variables
+   ```
 
 ### Configuration Lost After Mode Switch
 
@@ -292,8 +421,27 @@ chmod 600 ~/.config/ccconfig/current.env
 **Q: Which is better, Settings mode or ENV mode?**
 
 A:
-- **ENV mode** is recommended (default, better cross-shell support, instant apply)
-- If you prefer not to configure shell startup files, **Settings mode** can be simpler (only needs Claude Code restart)
+- **ENV mode (default, recommended)**: 
+  - ✅ Better cross-shell support
+  - ✅ Instant apply without Claude Code restart
+  - ✅ Configuration loaded automatically in terminal
+  - ⚠️ Requires one-time shell configuration
+  
+- **Settings mode**: 
+  - ✅ No shell configuration needed
+  - ✅ Simpler setup
+  - ⚠️ Requires Claude Code restart after each switch
+  - ⚠️ Only affects Claude Code, not terminal environment
+
+**Comparison:**
+
+| Feature | ENV Mode | Settings Mode |
+|---------|----------|---------------|
+| Setup complexity | Low (use -p/--permanent) or Medium (manual shell config) | Low |
+| Switch speed | Instant (eval command) or Fast (source shell config) | Slow (restart Claude Code) |
+| Terminal support | Yes | No |
+| Claude Code restart | Not required | Required |
+| Best for | Daily switching, CLI usage | Occasional switching |
 
 **Q: Can I use both modes simultaneously?**
 
@@ -314,7 +462,9 @@ A: Fully supported on Windows:
 
 A:
 - **Settings mode**: Need to restart Claude Code
-- **ENV mode**: Need to restart Shell (or use `env` command for immediate effect)
+- **ENV mode**: 
+  - With `-p/--permanent` flag: Need to restart shell or run `source ~/.bashrc` (or equivalent)
+  - Without `-p/--permanent` flag: Use `eval $(ccconfig env bash)` for immediate effect or restart shell
 
 **Q: Can I export configurations for team use?**
 

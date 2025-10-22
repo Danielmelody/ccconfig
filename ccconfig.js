@@ -511,10 +511,239 @@ function detectShellCommand() {
   return {shell: null, command: null};
 }
 
+function escapePosix(value) {
+  const str = value == null ? '' : String(value);
+  return `'${str.replace(/'/g, `'"'"'`)}'`;
+}
+
+function escapeFish(value) {
+  const str = value == null ? '' : String(value);
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
+}
+
+function escapePwsh(value) {
+  const str = value == null ? '' : String(value);
+  return `'${str.replace(/'/g, `''`)}'`;
+}
+
+/**
+ * Detect shell type and config file path
+ */
+function detectShellConfig() {
+  const shellPath = (process.env.SHELL || '').toLowerCase();
+  const homeDir = os.homedir();
+
+  if (process.env.FISH_VERSION || shellPath.includes('fish')) {
+    const configPath = path.join(homeDir, '.config', 'fish', 'config.fish');
+    return {shell: 'fish', configPath, detected: true};
+  }
+
+  if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
+      shellPath.includes('zsh')) {
+    const configPath = path.join(homeDir, '.zshrc');
+    return {shell: 'zsh', configPath, detected: true};
+  }
+
+  if (shellPath.includes('bash')) {
+    if (process.platform === 'darwin') {
+      const bashProfile = path.join(homeDir, '.bash_profile');
+      const bashrc = path.join(homeDir, '.bashrc');
+      const configPath = fs.existsSync(bashProfile) || !fs.existsSync(bashrc) ?
+          bashProfile :
+          bashrc;
+      return {shell: 'bash', configPath, detected: true};
+    }
+    const configPath = path.join(homeDir, '.bashrc');
+    return {shell: 'bash', configPath, detected: true};
+  }
+
+  if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
+      shellPath.includes('pwsh') || shellPath.includes('powershell')) {
+    // PowerShell profile path varies by OS
+    const configPath = process.platform === 'win32' ?
+        path.join(
+            process.env.USERPROFILE || homeDir, 'Documents', 'PowerShell',
+            'Microsoft.PowerShell_profile.ps1') :
+        path.join(homeDir, '.config', 'powershell', 'profile.ps1');
+    return {shell: 'powershell', configPath, detected: true};
+  }
+
+  return {shell: null, configPath: null, detected: false};
+}
+
+/**
+ * Write environment variables permanently to shell config file
+ */
+async function writePermanentEnv(envVars) {
+  const shellConfig = detectShellConfig();
+
+  if (!shellConfig.detected) {
+    console.error('Error: Unable to detect shell type');
+    console.error('Supported shells: bash, zsh, fish, powershell');
+    console.error(`Current SHELL: ${process.env.SHELL || '(not set)'}`);
+    process.exit(1);
+  }
+
+  const {shell, configPath} = shellConfig;
+  const marker = '# >>> ccconfig >>>';
+  const markerEnd = '# <<< ccconfig <<<';
+
+  // Generate environment variable lines
+  let envBlock = '';
+  switch (shell) {
+    case 'fish':
+      envBlock = `${marker}\n`;
+      for (const [key, value] of Object.entries(envVars)) {
+        envBlock += `set -gx ${key} "${escapeFish(value)}"\n`;
+      }
+      envBlock += `${markerEnd}\n`;
+      break;
+
+    case 'bash':
+    case 'zsh':
+      envBlock = `${marker}\n`;
+      for (const [key, value] of Object.entries(envVars)) {
+        envBlock += `export ${key}=${escapePosix(value)}\n`;
+      }
+      envBlock += `${markerEnd}\n`;
+      break;
+
+    case 'powershell':
+      envBlock = `${marker}\n`;
+      for (const [key, value] of Object.entries(envVars)) {
+        envBlock += `$env:${key}=${escapePwsh(value)}\n`;
+      }
+      envBlock += `${markerEnd}\n`;
+      break;
+  }
+
+  // Display warning and confirmation
+  console.log('');
+  console.log('⚠️  WARNING: This will modify your shell configuration file');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('');
+  console.log(`Target file: ${configPath}`);
+  console.log('');
+  console.log('The following block will be added/updated:');
+  console.log('───────────────────────────────────────────');
+  console.log(envBlock.trim());
+  console.log('───────────────────────────────────────────');
+  console.log('');
+  console.log('What this does:');
+  console.log('  • Adds environment variables to your shell startup file');
+  console.log('  • Uses markers to identify ccconfig-managed block');
+  console.log('  • Existing ccconfig block will be replaced if present');
+  console.log('  • Other content in the file will NOT be modified');
+  console.log('');
+  console.log('After this change:');
+  console.log(
+      '  • These environment variables will load automatically on shell startup');
+  console.log('  • You can switch profiles by running this command again');
+  console.log('  • To remove, manually delete the block between the markers');
+  console.log('');
+
+  // Ask for confirmation
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+
+  if (!isInteractive) {
+    console.error('Error: Cannot run in non-interactive mode');
+    console.error('The --permanent flag requires user confirmation');
+    console.error('Please run this command in an interactive terminal');
+    process.exit(1);
+  }
+
+  const rl =
+      readline.createInterface({input: process.stdin, output: process.stdout});
+
+  const confirmed = await new Promise(resolve => {
+    rl.question('Do you want to proceed? (yes/no): ', answer => {
+      rl.close();
+      const normalized = answer.trim().toLowerCase();
+      resolve(normalized === 'yes' || normalized === 'y');
+    });
+  });
+
+  if (!confirmed) {
+    console.log('');
+    console.log('Operation cancelled.');
+    console.log('');
+    console.log('Alternative: Use temporary mode without --permanent flag:');
+    console.log('  1. Run: ccconfig use <profile>');
+    console.log(
+        '  2. Apply: eval $(ccconfig env bash)  # or equivalent for your shell');
+    return;
+  }
+
+  console.log('');
+
+  try {
+    // Ensure config directory exists
+    ensureDir(path.dirname(configPath));
+
+    // Read existing config file
+    let content = '';
+    if (fs.existsSync(configPath)) {
+      content = fs.readFileSync(configPath, 'utf-8');
+    }
+
+    // Check if ccconfig block already exists
+    const hasBlock = content.includes(marker);
+
+    // Update content
+    if (hasBlock) {
+      // Replace existing block
+      const regex = new RegExp(
+          `${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${
+              markerEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`,
+          'g');
+      content = content.replace(regex, envBlock);
+    } else {
+      // Append new block
+      if (content && !content.endsWith('\n')) {
+        content += '\n';
+      }
+      content += '\n' + envBlock;
+    }
+
+    // Write back to config file
+    fs.writeFileSync(configPath, content, 'utf-8');
+
+    console.log(`✓ Environment variables written to ${shell} config file`);
+    console.log(`  Config file: ${configPath}`);
+    console.log('');
+    console.log('To apply immediately, run:');
+    let applyCommand = '';
+    switch (shell) {
+      case 'fish':
+        applyCommand = `source "${escapeFish(configPath)}"`;
+        break;
+      case 'bash':
+      case 'zsh':
+        applyCommand = `source ${escapePosix(configPath)}`;
+        break;
+      case 'powershell':
+        applyCommand = `. ${escapePwsh(configPath)}`;
+        break;
+      default:
+        applyCommand = `source ${configPath}`;
+        break;
+    }
+    console.log(`  ${applyCommand}`);
+    console.log('');
+    console.log('Or restart your shell');
+
+  } catch (error) {
+    console.error('');
+    console.error(
+        `Error: Unable to write to shell config file: ${error.message}`);
+    process.exit(1);
+  }
+}
+
 /**
  * Switch configuration
  */
-function use(name) {
+async function use(name, options = {}) {
   const profiles = loadProfiles();
 
   if (!profiles || !profiles.profiles ||
@@ -540,6 +769,7 @@ function use(name) {
   }
 
   const mode = getMode();
+  const permanent = options.permanent || false;
 
   if (mode === MODE_SETTINGS) {
     // Settings mode: directly modify ~/.claude/settings.json
@@ -555,6 +785,12 @@ function use(name) {
     console.log('');
     console.log('Configuration written to ~/.claude/settings.json');
     console.log('Restart Claude Code to make configuration take effect');
+
+    if (permanent) {
+      console.log('');
+      console.log(
+          'Note: --permanent flag is ignored in settings mode (settings.json is already permanent)');
+    }
   } else {
     // Env mode: write to environment variable file
     writeEnvFile(profile.env);
@@ -568,36 +804,49 @@ function use(name) {
     }
     console.log('');
     console.log(`Environment variable file updated: ${ENV_FILE}`);
-    console.log('');
-    const shellSuggestion = detectShellCommand();
-    const applyCommands = [
-      {command: 'eval $(ccconfig env bash)', note: '# Bash/Zsh'},
-      {command: 'ccconfig env fish | source', note: '# Fish'},
-      {command: 'ccconfig env pwsh | iex', note: '# PowerShell'}
-    ];
 
-    console.log('Apply immediately in current Shell (optional):');
-
-    if (shellSuggestion.command) {
+    if (permanent) {
+      console.log('');
       console.log(
-          `  ${shellSuggestion.command}  # Detected ${shellSuggestion.shell}`);
+          'Writing environment variables permanently to shell config...');
+      console.log('');
+      await writePermanentEnv(profile.env);
+    } else {
+      console.log('');
+      const shellSuggestion = detectShellCommand();
+      const applyCommands = [
+        {command: 'eval $(ccconfig env bash)', note: '# Bash/Zsh'},
+        {command: 'ccconfig env fish | source', note: '# Fish'},
+        {command: 'ccconfig env pwsh | iex', note: '# PowerShell'}
+      ];
 
-      const normalizedSuggestion =
-          shellSuggestion.command.replace(/\s+/g, ' ').trim();
-      for (const item of applyCommands) {
-        const normalizedCommand = item.command.replace(/\s+/g, ' ').trim();
-        if (normalizedCommand === normalizedSuggestion) {
-          item.skip = true;
+      console.log('Apply immediately in current Shell (optional):');
+
+      if (shellSuggestion.command) {
+        console.log(`  ${shellSuggestion.command}  # Detected ${
+            shellSuggestion.shell}`);
+
+        const normalizedSuggestion =
+            shellSuggestion.command.replace(/\s+/g, ' ').trim();
+        for (const item of applyCommands) {
+          const normalizedCommand = item.command.replace(/\s+/g, ' ').trim();
+          if (normalizedCommand === normalizedSuggestion) {
+            item.skip = true;
+          }
         }
       }
-    }
 
-    for (const item of applyCommands) {
-      if (item.skip) continue;
-      console.log(`  ${item.command} ${item.note}`);
+      for (const item of applyCommands) {
+        if (item.skip) continue;
+        console.log(`  ${item.command} ${item.note}`);
+      }
+      console.log('');
+      console.log('Or restart Shell to auto-load');
+      console.log('');
+      console.log(
+          'Tip: Use -p/--permanent flag to write directly to shell config:');
+      console.log(`  ccconfig use ${name} --permanent`);
     }
-    console.log('');
-    console.log('Or restart Shell to auto-load');
   }
 }
 
@@ -690,7 +939,7 @@ function current(showSecret = false) {
   console.log('  • ENV mode: Claude Code reads from 【3】(loaded from 【2】)');
   if (!showSecret) {
     console.log('');
-    console.log('Use --show-secret to display full token');
+    console.log('Use -s/--show-secret to display full token');
   }
   console.log('═══════════════════════════════════════════');
 }
@@ -726,13 +975,26 @@ function mode(newMode) {
     if (currentMode === MODE_SETTINGS) {
       console.log('SETTINGS mode:');
       console.log('  - Directly modify ~/.claude/settings.json');
+      console.log(
+          '  - Writes environment variables into settings.json env field');
       console.log('  - No Shell configuration needed');
       console.log('  - Restart Claude Code to take effect');
+      console.log('');
+      console.log('  How it works:');
+      console.log('    1. Run: ccconfig use <profile>');
+      console.log('    2. Settings written to ~/.claude/settings.json');
+      console.log('    3. Restart Claude Code to apply changes');
     } else {
-      console.log('ENV mode:');
+      console.log('ENV mode (default):');
       console.log('  - Use environment variable files');
       console.log('  - Need to configure Shell loading script');
       console.log('  - Cross-Shell configuration sharing');
+      console.log('  - No restart needed (instant apply)');
+      console.log('');
+      console.log('  How it works:');
+      console.log('    1. Run: ccconfig use <profile>');
+      console.log('    2. Writes to ~/.config/ccconfig/current.env');
+      console.log('    3. Shell loads on startup or eval command');
     }
     console.log('');
     console.log('Switch modes:');
@@ -782,23 +1044,20 @@ function env(format = 'bash') {
   switch (format) {
     case 'fish':
       for (const [key, value] of Object.entries(envVars)) {
-        const renderedValue = value == null ? '' : String(value);
-        console.log(`set -gx ${key} "${renderedValue}"`);
+        console.log(`set -gx ${key} "${escapeFish(value)}"`);
       }
       break;
     case 'bash':
     case 'zsh':
     case 'sh':
       for (const [key, value] of Object.entries(envVars)) {
-        const renderedValue = value == null ? '' : String(value);
-        console.log(`export ${key}="${renderedValue}"`);
+        console.log(`export ${key}=${escapePosix(value)}`);
       }
       break;
     case 'powershell':
     case 'pwsh':
       for (const [key, value] of Object.entries(envVars)) {
-        const renderedValue = value == null ? '' : String(value);
-        console.log(`$env:${key}="${renderedValue}"`);
+        console.log(`$env:${key}=${escapePwsh(value)}`);
       }
       break;
     case 'dotenv':
@@ -834,9 +1093,9 @@ function help() {
   console.log('');
   console.log('Global Options:');
   console.log(
-      '  --help, -h                                Display this help information');
+      '  -h, --help                                Display this help information');
   console.log(
-      '  --version, -V                             Display version information');
+      '  -V, --version                             Display version information');
   console.log('');
   console.log('Commands:');
   console.log(
@@ -844,17 +1103,25 @@ function help() {
   console.log(
       '  add [name]                                Add new configuration (interactive)');
   console.log(
-      '  use <name>                                Switch to specified configuration');
+      '  use <name> [-p|--permanent]               Switch to specified configuration');
   console.log(
       '  remove|rm <name>                          Remove configuration');
   console.log(
-      '  current [--show-secret]                   Display current configuration');
+      '  current [-s|--show-secret]                Display current configuration');
   console.log(
       '  mode [settings|env]                       View or switch mode');
   console.log(
       '  env [format]                              Output environment variables (env mode)');
   console.log(
       '  edit                                      Show configuration file location');
+  console.log('');
+  console.log('Flags:');
+  console.log(
+      '  -p, --permanent                           Write environment variables permanently to shell config');
+  console.log(
+      '                                            (only effective in env mode with use command)');
+  console.log(
+      '  -s, --show-secret                         Show full token in current command');
   console.log('');
   console.log('Configuration file locations:');
   console.log(`  Configuration list: ${PROFILES_FILE}`);
@@ -878,9 +1145,11 @@ async function main() {
   }
 
   // Extract flags
-  const showSecret = args.includes('--show-secret');
+  const showSecret = args.includes('--show-secret') || args.includes('-s');
+  const permanent = args.includes('--permanent') || args.includes('-p');
   const filteredArgs = args.filter(
-      arg => arg !== '--show-secret' && arg !== '--version' && arg !== '-V' &&
+      arg => arg !== '--show-secret' && arg !== '-s' && arg !== '--permanent' &&
+          arg !== '-p' && arg !== '--version' && arg !== '-V' &&
           arg !== '--help' && arg !== '-h');
 
   const command = filteredArgs[0];
@@ -893,10 +1162,10 @@ async function main() {
     case 'use':
       if (!filteredArgs[1]) {
         console.error('Error: Missing configuration name');
-        console.error('Usage: ccconfig use <name>');
+        console.error('Usage: ccconfig use <name> [-p|--permanent]');
         process.exit(1);
       }
-      use(filteredArgs[1]);
+      await use(filteredArgs[1], {permanent});
       break;
     case 'add':
       await add(filteredArgs[1]);
