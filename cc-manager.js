@@ -16,6 +16,16 @@ const MODE_FILE = path.join(CONFIG_DIR, 'mode');
 const MODE_SETTINGS = 'settings';  // Directly modify ~/.claude/settings.json
 const MODE_ENV = 'env';            // Use environment variable files
 
+let PACKAGE_VERSION = 'unknown';
+try {
+  const packageJson = require('./package.json');
+  if (packageJson && typeof packageJson.version === 'string') {
+    PACKAGE_VERSION = packageJson.version;
+  }
+} catch (_) {
+  // Keep default 'unknown' when package.json is unavailable
+}
+
 /**
  * Ensure directory exists
  */
@@ -102,12 +112,12 @@ function getMode() {
   try {
     if (fs.existsSync(MODE_FILE)) {
       const mode = fs.readFileSync(MODE_FILE, 'utf-8').trim();
-      return mode === MODE_ENV ? MODE_ENV : MODE_SETTINGS;
+      return mode === MODE_SETTINGS ? MODE_SETTINGS : MODE_ENV;
     }
   } catch (error) {
     // Ignore error, use default mode
   }
-  return MODE_SETTINGS;
+  return MODE_ENV;
 }
 
 /**
@@ -267,82 +277,21 @@ function getCurrentProfile() {
 }
 
 /**
- * Initialize configuration file
+ * Initialize configuration file (auto-called when needed)
  */
-function init(mode) {
-  const defaultProfiles = {
-    profiles: {
-      default: {
-        env: {
-          ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
-          ANTHROPIC_AUTH_TOKEN: 'sk-ant-xxxxxxxxxxxxx',
-          ANTHROPIC_API_KEY: 'sk-ant-xxxxxxxxxxxxx'
-        },
-        description: 'Default Anthropic API (please replace with actual values)'
-      },
-      example_mirror1: {
-        env: {
-          ANTHROPIC_BASE_URL: 'https://mirror1.example.com',
-          ANTHROPIC_AUTH_TOKEN: 'token-123',
-          ANTHROPIC_API_KEY: 'key-456'
-        },
-        description: 'Mirror site example 1 - using different token and key'
-      },
-      example_mirror2: {
-        env: {
-          ANTHROPIC_BASE_URL: 'https://mirror2.example.com',
-          ANTHROPIC_API_KEY: 'only-api-key-789'
-        },
-        description: 'Mirror site example 2 - only requires API_KEY'
-      }
-    }
-  };
-
-  try {
-    ensureDir(CONFIG_DIR);
-
-    if (fs.existsSync(PROFILES_FILE)) {
-      console.error(`Configuration file already exists: ${PROFILES_FILE}`);
+function initIfNeeded() {
+  if (!fs.existsSync(PROFILES_FILE)) {
+    const emptyProfiles = {profiles: {}};
+    try {
+      ensureDir(CONFIG_DIR);
+      saveProfiles(emptyProfiles);
+      console.log(`✓ Configuration file created: ${PROFILES_FILE}`);
+      console.log('');
+    } catch (error) {
       console.error(
-          'To reinitialize, please delete the existing configuration file first');
+          `Error: Unable to create configuration file: ${error.message}`);
       process.exit(1);
     }
-
-    // Set mode
-    const selectedMode = mode || MODE_SETTINGS;
-    setMode(selectedMode);
-
-    saveProfiles(defaultProfiles);
-    console.log(`✓ Configuration file created: ${PROFILES_FILE}`);
-    console.log(`✓ Mode set to: ${selectedMode}`);
-    console.log('');
-
-    if (selectedMode === MODE_SETTINGS) {
-      console.log('Current mode: SETTINGS mode');
-      console.log(
-          '  Directly modify ~/.claude/settings.json, no Shell configuration needed');
-      console.log('  Restart Claude Code to take effect');
-    } else {
-      console.log('Current mode: ENV mode');
-      console.log(
-          '  Uses environment variable files, need to configure loading script in Shell');
-      console.log('  See documentation section "Configure Shell Auto-loading"');
-    }
-
-    console.log('');
-    console.log('Next steps:');
-    console.log('1. Edit configuration file to add your actual configuration');
-    console.log(`   vim ${PROFILES_FILE}`);
-    console.log('');
-    console.log('2. Use use command to switch configuration');
-    console.log('   cc-manager use default');
-    console.log('');
-    console.log('Switch modes:');
-    console.log('   cc-manager mode settings  # Switch to settings mode');
-    console.log('   cc-manager mode env       # Switch to env mode');
-  } catch (error) {
-    console.error(`Error: ${error.message}`);
-    process.exit(1);
   }
 }
 
@@ -352,10 +301,16 @@ function init(mode) {
 function list() {
   const profiles = loadProfiles();
 
-  if (!profiles) {
-    console.error(`Error: Configuration file does not exist: ${PROFILES_FILE}`);
-    console.error('Please run first: cc-manager init');
-    process.exit(1);
+  if (!profiles || !profiles.profiles ||
+      Object.keys(profiles.profiles).length === 0) {
+    console.log('No configurations found.');
+    console.log('');
+    console.log('Add your first configuration:');
+    console.log('  cc-manager add work');
+    console.log('');
+    console.log(
+        'The command will guide you through configuration step by step.');
+    return;
   }
 
   const currentProfile = getCurrentProfile();
@@ -391,8 +346,18 @@ function list() {
 /**
  * Add new configuration
  */
-async function add(name, baseUrl, authToken, apiKey, description = '') {
+async function add(name) {
+  // Auto-initialize if needed
+  initIfNeeded();
+
   const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+
+  if (!isInteractive) {
+    console.error('Error: Interactive mode required for adding configurations');
+    console.error('This command must be run in an interactive terminal');
+    process.exit(1);
+  }
+
   let rl = null;
 
   const askQuestion = (question, defaultValue = '') => {
@@ -409,63 +374,36 @@ async function add(name, baseUrl, authToken, apiKey, description = '') {
     });
   };
 
+  let baseUrl, authToken, apiKey, description;
+
   try {
     if (!name) {
-      if (!isInteractive) {
-        console.error('Error: Missing configuration name');
-        console.error(
-            'Usage: cc-manager add <name> [baseUrl] [authToken] [apiKey] [description]');
-        process.exit(1);
-      }
       name = await askQuestion('Please enter configuration name (e.g., work)');
     }
 
-    if (!baseUrl) {
-      if (!isInteractive) {
-        console.error('Error: Missing ANTHROPIC_BASE_URL');
-        console.error(
-            'Please provide parameters explicitly in non-interactive environment');
-        console.error(
-            'Usage: cc-manager add <name> [baseUrl] [authToken] [apiKey] [description]');
-        process.exit(1);
-      }
-      baseUrl = await askQuestion(
-          'Please enter ANTHROPIC_BASE_URL (can be empty, default https://api.anthropic.com)',
-          'https://api.anthropic.com');
+    if (!name) {
+      console.error('Error: Configuration name cannot be empty');
+      process.exit(1);
     }
 
-    if (!authToken && isInteractive) {
-      authToken =
-          await askQuestion('Please enter ANTHROPIC_AUTH_TOKEN (can be empty)');
-    }
+    baseUrl = await askQuestion(
+        'Please enter ANTHROPIC_BASE_URL (can be empty, default https://api.anthropic.com)',
+        'https://api.anthropic.com');
 
-    if (!apiKey && isInteractive) {
-      apiKey =
-          await askQuestion('Please enter ANTHROPIC_API_KEY (can be empty)');
-    }
+    authToken =
+        await askQuestion('Please enter ANTHROPIC_AUTH_TOKEN (can be empty)');
 
-    if (!description && isInteractive) {
-      description = await askQuestion(
-          'Please enter configuration description (can be empty)');
-    }
+    apiKey = await askQuestion('Please enter ANTHROPIC_API_KEY (can be empty)');
+
+    description = await askQuestion(
+        'Please enter configuration description (can be empty)');
   } finally {
     if (rl) {
       rl.close();
     }
   }
 
-  if (!name) {
-    console.error('Error: Configuration name cannot be empty');
-    process.exit(1);
-  }
-
-  const profiles = loadProfiles();
-
-  if (!profiles) {
-    console.error(
-        'Error: Configuration file does not exist, please run init first');
-    process.exit(1);
-  }
+  const profiles = loadProfiles() || {profiles: {}};
 
   if (profiles.profiles[name]) {
     console.error(`Error: Configuration '${name}' already exists`);
@@ -506,7 +444,10 @@ async function add(name, baseUrl, authToken, apiKey, description = '') {
   console.log('');
   console.log('This information has been saved to:');
   console.log(`  ${PROFILES_FILE}`);
-  console.log('You can view or modify it anytime with cc-manager edit');
+  console.log(
+      'You can edit this file directly to further customize the profile:');
+  console.log(`  vim ${PROFILES_FILE}`);
+  console.log('Or run cc-manager edit to open it with your preferred editor');
 }
 
 /**
@@ -537,14 +478,49 @@ function remove(name) {
 }
 
 /**
+ * Detect current shell and return recommended activation command
+ */
+function detectShellCommand() {
+  const shellPath = (process.env.SHELL || '').toLowerCase();
+
+  if (process.env.FISH_VERSION || shellPath.includes('fish')) {
+    return {shell: 'fish', command: 'cc-manager env fish | source'};
+  }
+
+  if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
+      shellPath.includes('zsh')) {
+    return {shell: 'zsh', command: 'eval $(cc-manager env bash)'};
+  }
+
+  if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
+      shellPath.includes('pwsh') || shellPath.includes('powershell')) {
+    return {shell: 'PowerShell', command: 'cc-manager env pwsh | iex'};
+  }
+
+  if (shellPath.includes('bash')) {
+    return {shell: 'bash', command: 'eval $(cc-manager env bash)'};
+  }
+
+  if (process.platform === 'win32') {
+    const comSpec = (process.env.ComSpec || '').toLowerCase();
+    if (comSpec.includes('powershell')) {
+      return {shell: 'PowerShell', command: 'cc-manager env pwsh | iex'};
+    }
+  }
+
+  return {shell: null, command: null};
+}
+
+/**
  * Switch configuration
  */
 function use(name) {
   const profiles = loadProfiles();
 
-  if (!profiles) {
-    console.error(
-        'Error: Configuration file does not exist, please run init first');
+  if (!profiles || !profiles.profiles ||
+      Object.keys(profiles.profiles).length === 0) {
+    console.error('Error: No configurations found');
+    console.error('Please add a configuration first: cc-manager add <name>');
     process.exit(1);
   }
 
@@ -593,10 +569,33 @@ function use(name) {
     console.log('');
     console.log(`Environment variable file updated: ${ENV_FILE}`);
     console.log('');
+    const shellSuggestion = detectShellCommand();
+    const applyCommands = [
+      {command: 'eval $(cc-manager env bash)', note: '# Bash/Zsh'},
+      {command: 'cc-manager env fish | source', note: '# Fish'},
+      {command: 'cc-manager env pwsh | iex', note: '# PowerShell'}
+    ];
+
     console.log('Apply immediately in current Shell (optional):');
-    console.log('  eval $(cc-manager env bash)      # Bash/Zsh');
-    console.log('  cc-manager env fish | source     # Fish');
-    console.log('  cc-manager env pwsh | iex        # PowerShell');
+
+    if (shellSuggestion.command) {
+      console.log(
+          `  ${shellSuggestion.command}  # Detected ${shellSuggestion.shell}`);
+
+      const normalizedSuggestion =
+          shellSuggestion.command.replace(/\s+/g, ' ').trim();
+      for (const item of applyCommands) {
+        const normalizedCommand = item.command.replace(/\s+/g, ' ').trim();
+        if (normalizedCommand === normalizedSuggestion) {
+          item.skip = true;
+        }
+      }
+    }
+
+    for (const item of applyCommands) {
+      if (item.skip) continue;
+      console.log(`  ${item.command} ${item.note}`);
+    }
     console.log('');
     console.log('Or restart Shell to auto-load');
   }
@@ -697,12 +696,12 @@ function current(showSecret = false) {
 }
 
 /**
- * Edit configuration file
+ * Show configuration file path
  */
 function edit() {
   if (!fs.existsSync(PROFILES_FILE)) {
-    console.error(
-        'Error: Configuration file does not exist, please run init first');
+    console.error('Error: Configuration file does not exist');
+    console.error('Please add a configuration first: cc-manager add <name>');
     process.exit(1);
   }
 
@@ -822,52 +821,40 @@ function env(format = 'bash') {
 function help() {
   console.log('Claude Code Configuration Manager');
   console.log('');
+  console.log(`Profiles are stored in: ${PROFILES_FILE}`);
+  console.log('');
   console.log('Supports two modes:');
   console.log(
-      '  settings - Directly modify ~/.claude/settings.json (default, no Shell config needed)');
+      '  env      - Use environment variable files (default, cross-Shell, instant apply)');
   console.log(
-      '  env      - Use environment variable files (cross-Shell, Shell config required)');
+      '  settings - Directly modify ~/.claude/settings.json (no Shell config needed)');
   console.log('');
   console.log('Usage:');
-  console.log(
-      '  cc-manager init [mode]                    Initialize configuration file');
-  console.log(
-      '  cc-manager list|ls                        List all configurations');
-  console.log(
-      '  cc-manager use <name>                     Switch to specified configuration');
-  console.log(
-      '  cc-manager add <name> [baseUrl] [authToken] [apiKey] [description]');
-  console.log(
-      '                                             Add new configuration');
-  console.log(
-      '  cc-manager remove|rm <name>               Remove configuration');
-  console.log(
-      '  cc-manager current [--show-secret]        Display current configuration');
-  console.log(
-      '  cc-manager mode [settings|env]            View or switch mode');
-  console.log(
-      '  cc-manager env [format]                   Output environment variables (env mode)');
-  console.log(
-      '  cc-manager edit                           Show configuration file location');
-  console.log(
-      '  cc-manager help                           Display this help information');
+  console.log('  cc-manager [command] [options]');
   console.log('');
-  console.log('Examples:');
-  console.log('  # Use settings mode (recommended)');
-  console.log('  cc-manager init settings');
+  console.log('Global Options:');
   console.log(
-      '  cc-manager add work https://api.example.com sk-auth-work sk-key-work "Work account"');
-  console.log('  cc-manager use work');
-  console.log('');
-  console.log('  # Use env mode (cross-Shell)');
-  console.log('  cc-manager init env');
-  console.log('  cc-manager use work');
+      '  --help, -h                                Display this help information');
   console.log(
-      '  eval $(cc-manager env bash)  # Apply immediately in current Shell');
+      '  --version, -V                             Display version information');
   console.log('');
-  console.log('  # Switch modes');
-  console.log('  cc-manager mode env         # Switch to env mode');
-  console.log('  cc-manager mode             # View current mode');
+  console.log('Commands:');
+  console.log(
+      '  list|ls                                   List all configurations (default)');
+  console.log(
+      '  add [name]                                Add new configuration (interactive)');
+  console.log(
+      '  use <name>                                Switch to specified configuration');
+  console.log(
+      '  remove|rm <name>                          Remove configuration');
+  console.log(
+      '  current [--show-secret]                   Display current configuration');
+  console.log(
+      '  mode [settings|env]                       View or switch mode');
+  console.log(
+      '  env [format]                              Output environment variables (env mode)');
+  console.log(
+      '  edit                                      Show configuration file location');
   console.log('');
   console.log('Configuration file locations:');
   console.log(`  Configuration list: ${PROFILES_FILE}`);
@@ -879,16 +866,26 @@ function help() {
 async function main() {
   const args = process.argv.slice(2);
 
+  // Handle global flags first (standardized behavior)
+  if (args.includes('--version') || args.includes('-V')) {
+    showVersion();
+    return;
+  }
+
+  if (args.includes('--help') || args.includes('-h')) {
+    help();
+    return;
+  }
+
   // Extract flags
   const showSecret = args.includes('--show-secret');
-  const filteredArgs = args.filter(arg => !arg.startsWith('--'));
+  const filteredArgs = args.filter(
+      arg => arg !== '--show-secret' && arg !== '--version' && arg !== '-V' &&
+          arg !== '--help' && arg !== '-h');
 
   const command = filteredArgs[0];
 
   switch (command) {
-    case 'init':
-      init(filteredArgs[1]);
-      break;
     case 'list':
     case 'ls':
       list();
@@ -902,9 +899,7 @@ async function main() {
       use(filteredArgs[1]);
       break;
     case 'add':
-      await add(
-          filteredArgs[1], filteredArgs[2], filteredArgs[3], filteredArgs[4],
-          filteredArgs[5]);
+      await add(filteredArgs[1]);
       break;
     case 'remove':
     case 'rm':
@@ -922,20 +917,19 @@ async function main() {
     case 'edit':
       edit();
       break;
-    case 'help':
-    case '--help':
-    case '-h':
-      help();
-      break;
     default:
       if (!command) {
         list();
       } else {
         console.error(`Error: Unknown command '${command}'`);
-        console.error('Run cc-manager help to see help');
+        console.error('Run cc-manager --help to see help');
         process.exit(1);
       }
   }
+}
+
+function showVersion() {
+  console.log(`cc-manager version ${PACKAGE_VERSION}`);
 }
 
 (async () => {

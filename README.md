@@ -1,77 +1,61 @@
 # Claude Code Configuration Manager
 
-A Node.js tool for quickly switching Claude Code API configurations (BASE_URL, AUTH_TOKEN, and API_KEY).
+Quickly switch between different claude-code providers
 
-## Features
 
-- **Dual Mode Support**: Settings mode (recommended) and ENV mode
-- **Zero Shell Dependencies**: Settings mode requires no Shell configuration
-- **Cross-Platform**: Full support for Windows, macOS, and Linux
-- **Multi-Configuration Management**: Easily manage and switch between multiple API configurations
-- **Configuration Visibility**: View status from all configuration sources simultaneously
-- **Security**: Automatic file permissions, sensitive information hidden by default
+```bash
+# Switch to work configuration during work hours
+cc-manager use company
 
-## Mode Comparison
-
-### Settings Mode (Recommended)
-
-- **Principle**: Directly modify the `env` field in `~/.claude/settings.json`
-- **Advantages**: No Shell configuration required, works out of the box
-- **Use Case**: Using only one Shell, or prefer not to configure Shell
-- **Activation**: Restart Claude Code
-
-### ENV Mode
-
-- **Principle**: Write to environment variable files, loaded when Shell starts
-- **Advantages**: Cross-Shell configuration sharing (Fish, Bash, Zsh, etc.)
-- **Use Case**: Using multiple Shells, want configuration synchronization
-- **Activation**: Restart Shell or use `env` command for immediate effect
+# Switch back to personal configuration after work
+cc-manager use personal
+```
 
 ## Quick Start
 
 ### Installation
 
 ```bash
-# Method 1: Global installation
-chmod +x cc-manager.js
-sudo ln -s $(pwd)/cc-manager.js /usr/local/bin/cc-manager
-
-# Method 2: Using npm
-npm install -g .
+# Install from npm (recommended)
+npm install -g cc-manager
 ```
 
-### Settings Mode (Recommended)
+### ENV Mode (Recommended, Default)
 
 ```bash
-# 1. Initialize in settings mode
-cc-manager init settings
+# 1. Configure Shell auto-loading (see below)
 
-# 2. Add configuration (interactive prompts for missing parameters)
-cc-manager add work https://api.example.com sk-auth-work sk-key-work "Work account"
+# 2. Add configuration (interactive mode)
+cc-manager add
+# Follow the prompts to enter:
+# - Name
+# - ANTHROPIC_BASE_URL
+# - ANTHROPIC_AUTH_TOKEN
+# - ANTHROPIC_API_KEY
+# - Description
+
+# 3. Switch configuration
+cc-manager use work
+
+# 4. Restart Shell or apply immediately
+eval $(cc-manager env bash)  # or use the detected command from output
+```
+
+### Settings Mode
+
+```bash
+# 1. Switch to settings mode
+cc-manager mode settings
+
+# 2. Add configuration (interactive mode)
+cc-manager add
+# Follow the prompts to configure
 
 # 3. Switch configuration
 cc-manager use work
 
 # 4. Restart Claude Code
 # Configuration is now active!
-```
-
-### ENV Mode (Cross-Shell)
-
-```bash
-# 1. Initialize in env mode
-cc-manager init env
-
-# 2. Configure Shell auto-loading (see below)
-
-# 3. Add configuration (interactive prompts for missing parameters)
-cc-manager add work https://api.example.com sk-auth-work sk-key-work "Work account"
-
-# 4. Switch configuration
-cc-manager use work
-
-# 5. Restart Shell or apply immediately
-eval $(cc-manager env bash)
 ```
 
 #### ENV Mode Shell Configuration
@@ -124,14 +108,14 @@ if (Test-Path $claudeEnv) {
 ### Basic Commands
 
 ```bash
-# Initialize (select mode)
-cc-manager init [settings|env]
+# Run without command (defaults to list)
+cc-manager
 
 # List all configurations
 cc-manager list
 
-# Add new configuration
-cc-manager add <name> [baseUrl] [authToken] [apiKey] [description]
+# Add new configuration (interactive mode only, auto-creates config file on first use)
+cc-manager add
 
 # Switch configuration
 cc-manager use <name>
@@ -143,8 +127,11 @@ cc-manager remove <name>
 cc-manager current
 cc-manager current --show-secret  # Show full token
 
-# Edit configuration file
+# Show configuration file path
 cc-manager edit
+
+# View version
+cc-manager --version  # or -V
 ```
 
 ### Mode Management
@@ -186,92 +173,24 @@ cc-manager env dotenv > .env
 ```json
 {
   "profiles": {
-    "default": {
-      "env": {
-        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
-        "ANTHROPIC_AUTH_TOKEN": "sk-ant-default-xxxxxxxx",
-        "ANTHROPIC_API_KEY": "sk-ant-default-xxxxxxxx"
-      },
-      "description": "Official API"
-    },
     "work": {
       "env": {
         "ANTHROPIC_BASE_URL": "https://api-proxy.company.com",
-        "ANTHROPIC_AUTH_TOKEN": "sk-auth-work-yyyyyyyy",
-        "ANTHROPIC_API_KEY": "sk-key-work-yyyyyyyy"
+        "ANTHROPIC_AUTH_TOKEN": "sk-auth-work-xxxxx",
+        "ANTHROPIC_API_KEY": "sk-key-work-xxxxx"
       },
-      "description": "Company Proxy"
+      "description": "Work account"
     },
-    "local": {
+    "personal": {
       "env": {
-        "ANTHROPIC_BASE_URL": "http://localhost:8080",
-        "ANTHROPIC_API_KEY": "test-key"
+        "ANTHROPIC_BASE_URL": "https://api.anthropic.com",
+        "ANTHROPIC_AUTH_TOKEN": "sk-ant-personal-xxxxx",
+        "ANTHROPIC_API_KEY": "sk-ant-personal-xxxxx"
       },
-      "description": "Local Testing"
+      "description": "Personal account"
     }
   }
 }
-```
-
-## Usage Scenarios
-
-### Scenario 1: Work and Personal API Switching
-
-```bash
-# Add work and personal configurations
-cc-manager add company https://api-proxy.work.com sk-auth-work sk-key-work "Work"
-cc-manager add personal https://api.anthropic.com sk-auth-personal sk-key-personal "Personal"
-
-# Switch to work configuration during work hours
-cc-manager use company
-
-# Switch back to personal configuration after work
-cc-manager use personal
-```
-
-### Scenario 2: Multi-Environment Development
-
-```bash
-# Add different environments
-cc-manager add prod https://api.anthropic.com sk-auth-prod sk-key-prod "Production"
-cc-manager add staging https://staging.example.com sk-auth-staging sk-key-staging "Staging"
-cc-manager add dev http://localhost:8080 dev-auth dev-key "Local"
-
-# Switch as needed
-cc-manager use dev
-```
-
-### Scenario 3: Viewing Configuration Status
-
-```bash
-# View all configuration sources
-cc-manager current
-
-# Output example:
-# ═══════════════════════════════════════════
-# Claude Code Configuration Status
-# ═══════════════════════════════════════════
-#
-# Current Mode: settings
-# Active Configuration: work
-#
-# 【1】~/.claude/settings.json:
-#   ANTHROPIC_BASE_URL:   https://api-proxy.work.com
-#   ANTHROPIC_AUTH_TOKEN: sk-ant-work-yyyyyyyy...
-#
-# 【2】Environment Variables File:
-#   (Not configured)
-#
-# 【3】Current Process Environment Variables:
-#   (Not set)
-#
-# ───────────────────────────────────────────
-# Notes:
-#   • Settings mode: Claude Code reads from 【1】
-#   • ENV mode: Claude Code reads from 【3】(loaded from 【2】)
-#
-# Use --show-secret to display full token
-# ═══════════════════════════════════════════
 ```
 
 ## Advanced Usage
@@ -373,8 +292,8 @@ chmod 600 ~/.config/claude-code/current.env
 **Q: Which is better, Settings mode or ENV mode?**
 
 A:
-- If using only one Shell, **Settings mode** is recommended (simpler)
-- If using multiple Shells (e.g., Fish + Bash), **ENV mode** is recommended (configuration synchronization)
+- **ENV mode** is recommended (default, better cross-shell support, instant apply)
+- If you prefer not to configure shell startup files, **Settings mode** can be simpler (only needs Claude Code restart)
 
 **Q: Can I use both modes simultaneously?**
 
@@ -423,14 +342,11 @@ cat ~/.config/claude-code/profiles.json | \
 ### Testing
 
 ```bash
-# Test help
-node cc-manager.js help
+# Test version output
+node cc-manager.js --version
 
-# Test initialization
-node cc-manager.js init settings
-
-# Test adding configuration
-node cc-manager.js add test http://localhost:8080 test-key "Test"
+# Test adding configuration (interactive only)
+node cc-manager.js add
 
 # Test listing
 node cc-manager.js list
@@ -441,6 +357,10 @@ node cc-manager.js use test
 # Test status viewing
 node cc-manager.js current
 node cc-manager.js current --show-secret
+
+# Test mode switching
+node cc-manager.js mode
+node cc-manager.js mode env
 ```
 
 ## License

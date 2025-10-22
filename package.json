@@ -7,7 +7,7 @@
     "cc-manager": "./cc-manager.js"
   },
   "scripts": {
-    "test": "node cc-manager.js help"
+    "test": "node cc-manager.js --version"
   },
   "keywords": [
     "claude",
