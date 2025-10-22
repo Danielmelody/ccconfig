@@ -1,5 +1,5 @@
 {
-  "name": "cc-manager",
+  "name": "@danielhu/cc-manager",
   "version": "1.0.0",
   "description": "Cross-platform Claude Code configuration switching tool",
   "main": "cc-manager.js",

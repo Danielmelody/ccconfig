@@ -17,7 +17,7 @@ cc-manager use personal
 
 ```bash
 # Install from npm (recommended)
-npm install -g cc-manager
+npm install -g @danielhu/cc-manager
 ```
 
 ### ENV Mode (Recommended, Default)
