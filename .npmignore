@@ -1,0 +1,27 @@
+# Development files
+node_modules/
+*.log
+.DS_Store
+
+# Test files
+test/
+tests/
+*.test.js
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git files
+.git/
+.gitignore
+
+# CI files
+.github/
+.gitlab-ci.yml
+
+# Local config (don't publish user's local configs)
+.claude/
+
