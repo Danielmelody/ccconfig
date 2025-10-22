@@ -2,12 +2,12 @@
   "name": "ccconfig",
   "version": "1.0.0",
   "description": "Cross-platform Claude Code configuration switching tool",
-  "main": "cc-manager.js",
+  "main": "ccconfig.js",
   "bin": {
-    "ccconfig": "cc-manager.js"
+    "ccconfig": "ccconfig.js"
   },
   "scripts": {
-    "test": "node cc-manager.js --version"
+    "test": "node ccconfig.js --version"
   },
   "keywords": [
     "claude",
