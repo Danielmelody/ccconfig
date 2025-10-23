@@ -37,7 +37,8 @@ ccconfig add
 # - ANTHROPIC_BASE_URL
 # - ANTHROPIC_AUTH_TOKEN
 # - ANTHROPIC_API_KEY
-# - Description
+# - ANTHROPIC_MODEL (optional)
+# - ANTHROPIC_SMALL_FAST_MODEL (optional)
 
 # 3. Switch configuration
 ccconfig use work
@@ -74,7 +75,8 @@ ccconfig add
 # - ANTHROPIC_BASE_URL
 # - ANTHROPIC_AUTH_TOKEN
 # - ANTHROPIC_API_KEY
-# - Description
+# - ANTHROPIC_MODEL (optional)
+# - ANTHROPIC_SMALL_FAST_MODEL (optional)
 
 # 3. Switch configuration
 ccconfig use work
@@ -180,6 +182,91 @@ if (Test-Path $cconfigEnv) {
 **Note**: Manual configuration allows you to switch profiles dynamically by changing `current.env`, while `-p/--permanent` writes the values directly into the shell config.
 
 ## Advanced Usage
+
+### Update Existing Configuration
+
+If you need to modify an existing configuration, use the `update` command:
+
+```bash
+# Update a configuration interactively
+ccconfig update work
+
+# The tool will:
+# 1. Show current values as defaults
+# 2. Prompt for each field
+# 3. Press Enter to keep current value, or type new value to update
+```
+
+**Example:**
+```bash
+$ ccconfig update work
+Updating configuration 'work'
+Press Enter to keep the current value, or enter a new value to update
+
+ANTHROPIC_BASE_URL [https://api.company.com]: https://new-api.company.com
+ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <press Enter to keep>
+ANTHROPIC_API_KEY []: sk-new-key-123
+ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <press Enter to keep>
+Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
+
+✓ Configuration 'work' updated
+```
+
+**Note:** After updating a configuration, remember to activate it with `ccconfig use work` if you want the changes to take effect immediately.
+
+### Shell Completion
+
+ccconfig supports shell completion for commands, profile names, and options. This makes it easier to discover and use commands.
+
+**Features:**
+- ✅ Command completion (list, add, update, use, remove, etc.)
+- ✅ Profile name completion (dynamically reads from your configurations)
+- ✅ Option completion (--permanent, --show-secret, etc.)
+- ✅ Mode completion (settings, env)
+- ✅ Format completion (bash, zsh, fish, etc.)
+
+**Installation:**
+
+```bash
+# Bash
+ccconfig completion bash >> ~/.bashrc
+source ~/.bashrc
+
+# Zsh
+ccconfig completion zsh >> ~/.zshrc
+source ~/.zshrc
+
+# Fish
+ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish
+# Fish will automatically load it on next startup
+
+# PowerShell
+ccconfig completion pwsh >> $PROFILE
+# Reload profile: . $PROFILE
+```
+
+**Note for PowerShell:** If you get an error about `$PROFILE` not existing, create it first:
+```powershell
+New-Item -Path $PROFILE -ItemType File -Force
+ccconfig completion pwsh >> $PROFILE
+. $PROFILE
+```
+
+**Usage examples after installing completion:**
+
+```bash
+# Type 'ccconfig' and press TAB to see all commands
+ccconfig <TAB>
+# Shows: list, add, update, use, remove, current, mode, env, edit, completion
+
+# Type 'ccconfig use' and press TAB to see all profiles
+ccconfig use <TAB>
+# Shows: work, personal, project1, etc.
+
+# Type 'ccconfig mode' and press TAB
+ccconfig mode <TAB>
+# Shows: settings, env
+```
 
 ### Quick Aliases
 

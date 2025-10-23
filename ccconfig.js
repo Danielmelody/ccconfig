@@ -147,6 +147,8 @@ function updateClaudeSettings(envVars) {
   delete settings.env.ANTHROPIC_BASE_URL;
   delete settings.env.ANTHROPIC_AUTH_TOKEN;
   delete settings.env.ANTHROPIC_API_KEY;
+  delete settings.env.ANTHROPIC_MODEL;
+  delete settings.env.ANTHROPIC_SMALL_FAST_MODEL;
 
   // Set new environment variables
   Object.assign(settings.env, envVars);
@@ -323,8 +325,11 @@ function list() {
     if (profile.env && profile.env.ANTHROPIC_BASE_URL) {
       console.log(`    URL: ${profile.env.ANTHROPIC_BASE_URL}`);
     }
-    if (profile.description) {
-      console.log(`    Description: ${profile.description}`);
+    if (profile.env && profile.env.ANTHROPIC_MODEL) {
+      console.log(`    Model: ${profile.env.ANTHROPIC_MODEL}`);
+    }
+    if (profile.env && profile.env.ANTHROPIC_SMALL_FAST_MODEL) {
+      console.log(`    Small Fast Model: ${profile.env.ANTHROPIC_SMALL_FAST_MODEL}`);
     }
     console.log('');
   }
@@ -374,7 +379,8 @@ async function add(name) {
     });
   };
 
-  let baseUrl, authToken, apiKey, description;
+  let baseUrl, authToken, apiKey, model, smallFastModel;
+  let profiles;
 
   try {
     if (!name) {
@@ -386,29 +392,31 @@ async function add(name) {
       process.exit(1);
     }
 
+    // Check if configuration already exists before asking for details
+    profiles = loadProfiles() || {profiles: {}};
+
+    if (profiles.profiles[name]) {
+      console.error(`Error: Configuration '${name}' already exists`);
+      console.error('To update, please edit the configuration file directly');
+      process.exit(1);
+    }
+
     baseUrl = await askQuestion(
-        'Please enter ANTHROPIC_BASE_URL (can be empty, default https://api.anthropic.com)',
+        'Please enter ANTHROPIC_BASE_URL (press Enter for default)',
         'https://api.anthropic.com');
 
     authToken =
-        await askQuestion('Please enter ANTHROPIC_AUTH_TOKEN (can be empty)');
+        await askQuestion('Please enter ANTHROPIC_AUTH_TOKEN (press Enter to set as empty)');
 
-    apiKey = await askQuestion('Please enter ANTHROPIC_API_KEY (can be empty)');
+    apiKey = await askQuestion('Please enter ANTHROPIC_API_KEY (press Enter to set as empty)');
 
-    description = await askQuestion(
-        'Please enter configuration description (can be empty)');
+    model = await askQuestion('Please enter ANTHROPIC_MODEL (press Enter to skip)');
+
+    smallFastModel = await askQuestion('Please enter ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip)');
   } finally {
     if (rl) {
       rl.close();
     }
-  }
-
-  const profiles = loadProfiles() || {profiles: {}};
-
-  if (profiles.profiles[name]) {
-    console.error(`Error: Configuration '${name}' already exists`);
-    console.error('To update, please edit the configuration file directly');
-    process.exit(1);
   }
 
   const envVars = {
@@ -417,7 +425,15 @@ async function add(name) {
     ANTHROPIC_API_KEY: apiKey || ''
   };
 
-  profiles.profiles[name] = {env: envVars, description};
+  // Add optional model variables if provided
+  if (model) {
+    envVars.ANTHROPIC_MODEL = model;
+  }
+  if (smallFastModel) {
+    envVars.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
+  }
+
+  profiles.profiles[name] = {env: envVars};
 
   saveProfiles(profiles);
   console.log(`✓ Configuration '${name}' added`);
@@ -441,6 +457,12 @@ async function add(name) {
   safePrint('ANTHROPIC_BASE_URL', envVars.ANTHROPIC_BASE_URL, false);
   safePrint('ANTHROPIC_AUTH_TOKEN', envVars.ANTHROPIC_AUTH_TOKEN);
   safePrint('ANTHROPIC_API_KEY', envVars.ANTHROPIC_API_KEY);
+  if (envVars.ANTHROPIC_MODEL) {
+    safePrint('ANTHROPIC_MODEL', envVars.ANTHROPIC_MODEL, false);
+  }
+  if (envVars.ANTHROPIC_SMALL_FAST_MODEL) {
+    safePrint('ANTHROPIC_SMALL_FAST_MODEL', envVars.ANTHROPIC_SMALL_FAST_MODEL, false);
+  }
   console.log('');
   console.log('This information has been saved to:');
   console.log(`  ${PROFILES_FILE}`);
@@ -448,6 +470,131 @@ async function add(name) {
       'You can edit this file directly to further customize the profile:');
   console.log(`  vim ${PROFILES_FILE}`);
   console.log('Or run ccconfig edit to open it with your preferred editor');
+}
+
+/**
+ * Update existing configuration
+ */
+async function update(name) {
+  // Auto-initialize if needed
+  initIfNeeded();
+
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+
+  if (!isInteractive) {
+    console.error('Error: Interactive mode required for updating configurations');
+    console.error('This command must be run in an interactive terminal');
+    process.exit(1);
+  }
+
+  let rl = null;
+
+  const askQuestion = (question, defaultValue = '') => {
+    if (!rl) {
+      rl = readline.createInterface(
+          {input: process.stdin, output: process.stdout});
+    }
+    return new Promise(resolve => {
+      const suffix = defaultValue ? ` [${defaultValue}]` : '';
+      rl.question(`${question}${suffix}: `, answer => {
+        const trimmed = answer.trim();
+        resolve(trimmed ? trimmed : defaultValue);
+      });
+    });
+  };
+
+  let baseUrl, authToken, apiKey, model, smallFastModel;
+  let profiles;
+
+  try {
+    if (!name) {
+      name = await askQuestion('Please enter configuration name to update');
+    }
+
+    if (!name) {
+      console.error('Error: Configuration name cannot be empty');
+      process.exit(1);
+    }
+
+    // Check if configuration exists
+    profiles = loadProfiles() || {profiles: {}};
+
+    if (!profiles.profiles[name]) {
+      console.error(`Error: Configuration '${name}' does not exist`);
+      console.error('Run ccconfig list to see available configurations');
+      console.error(`Or use 'ccconfig add ${name}' to create a new configuration`);
+      process.exit(1);
+    }
+
+    const existingProfile = profiles.profiles[name];
+    const existingEnv = existingProfile.env || {};
+
+    console.log(`Updating configuration '${name}'`);
+    console.log('Press Enter to keep current value/default, or enter new value to update');
+    console.log('');
+
+    baseUrl = await askQuestion(
+        'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
+        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
+
+    authToken =
+        await askQuestion('ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)', existingEnv.ANTHROPIC_AUTH_TOKEN || '');
+
+    apiKey = await askQuestion('ANTHROPIC_API_KEY (press Enter to keep current/set empty)', existingEnv.ANTHROPIC_API_KEY || '');
+
+    model = await askQuestion('ANTHROPIC_MODEL (press Enter to skip/keep current)', existingEnv.ANTHROPIC_MODEL || '');
+
+    smallFastModel = await askQuestion('ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)', existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '');
+  } finally {
+    if (rl) {
+      rl.close();
+    }
+  }
+
+  const envVars = {
+    ANTHROPIC_BASE_URL: baseUrl || '',
+    ANTHROPIC_AUTH_TOKEN: authToken || '',
+    ANTHROPIC_API_KEY: apiKey || ''
+  };
+
+  // Add optional model variables if provided
+  if (model) {
+    envVars.ANTHROPIC_MODEL = model;
+  }
+  if (smallFastModel) {
+    envVars.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
+  }
+
+  profiles.profiles[name] = {env: envVars};
+
+  saveProfiles(profiles);
+  console.log(`✓ Configuration '${name}' updated`);
+  console.log('');
+  console.log('Updated environment variables:');
+  const safePrint = (key, value, mask = true) => {
+    if (!value) {
+      console.log(`  ${key}: (not set)`);
+      return;
+    }
+    if (!mask) {
+      console.log(`  ${key}: ${value}`);
+      return;
+    }
+    const masked = value.length > 20 ? value.substring(0, 20) + '...' : value;
+    console.log(`  ${key}: ${masked}`);
+  };
+  safePrint('ANTHROPIC_BASE_URL', envVars.ANTHROPIC_BASE_URL, false);
+  safePrint('ANTHROPIC_AUTH_TOKEN', envVars.ANTHROPIC_AUTH_TOKEN);
+  safePrint('ANTHROPIC_API_KEY', envVars.ANTHROPIC_API_KEY);
+  if (envVars.ANTHROPIC_MODEL) {
+    safePrint('ANTHROPIC_MODEL', envVars.ANTHROPIC_MODEL, false);
+  }
+  if (envVars.ANTHROPIC_SMALL_FAST_MODEL) {
+    safePrint('ANTHROPIC_SMALL_FAST_MODEL', envVars.ANTHROPIC_SMALL_FAST_MODEL, false);
+  }
+  console.log('');
+  console.log('Run the following command to activate:');
+  console.log(`  ccconfig use ${name}`);
 }
 
 /**
@@ -860,7 +1007,9 @@ function current(showSecret = false) {
   const processEnv = {
     ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
     ANTHROPIC_AUTH_TOKEN: process.env.ANTHROPIC_AUTH_TOKEN,
-    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+    ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
+    ANTHROPIC_SMALL_FAST_MODEL: process.env.ANTHROPIC_SMALL_FAST_MODEL
   };
   const currentProfile = getCurrentProfile();
 
@@ -890,6 +1039,12 @@ function current(showSecret = false) {
 
     console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
     console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
+    if (settings.env.ANTHROPIC_MODEL) {
+      console.log(`  ANTHROPIC_MODEL:      ${settings.env.ANTHROPIC_MODEL}`);
+    }
+    if (settings.env.ANTHROPIC_SMALL_FAST_MODEL) {
+      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${settings.env.ANTHROPIC_SMALL_FAST_MODEL}`);
+    }
   } else {
     console.log('  (not configured)');
   }
@@ -909,6 +1064,12 @@ function current(showSecret = false) {
 
     console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
     console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
+    if (envFile.ANTHROPIC_MODEL) {
+      console.log(`  ANTHROPIC_MODEL:      ${envFile.ANTHROPIC_MODEL}`);
+    }
+    if (envFile.ANTHROPIC_SMALL_FAST_MODEL) {
+      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${envFile.ANTHROPIC_SMALL_FAST_MODEL}`);
+    }
   } else {
     console.log('  (not configured)');
   }
@@ -927,6 +1088,12 @@ function current(showSecret = false) {
 
     console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
     console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
+    if (processEnv.ANTHROPIC_MODEL) {
+      console.log(`  ANTHROPIC_MODEL:      ${processEnv.ANTHROPIC_MODEL}`);
+    }
+    if (processEnv.ANTHROPIC_SMALL_FAST_MODEL) {
+      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${processEnv.ANTHROPIC_SMALL_FAST_MODEL}`);
+    }
   } else {
     console.log('  (not set)');
   }
@@ -1075,6 +1242,268 @@ function env(format = 'bash') {
 }
 
 /**
+ * Generate shell completion script
+ */
+function completion(shell) {
+  if (!shell) {
+    console.error('Error: Missing shell type');
+    console.error('Usage: ccconfig completion <bash|zsh|fish|powershell|pwsh>');
+    console.error('');
+    console.error('To install:');
+    console.error('  Bash:       ccconfig completion bash >> ~/.bashrc');
+    console.error('  Zsh:        ccconfig completion zsh >> ~/.zshrc');
+    console.error('  Fish:       ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish');
+    console.error('  PowerShell: ccconfig completion pwsh >> $PROFILE');
+    process.exit(1);
+  }
+
+  const commands = 'list ls add update use remove rm current mode env edit';
+
+  switch (shell) {
+    case 'bash':
+      console.log(`# ccconfig bash completion
+_ccconfig_completions() {
+  local cur prev commands profiles
+  COMPREPLY=()
+  cur="\${COMP_WORDS[COMP_CWORD]}"
+  prev="\${COMP_WORDS[COMP_CWORD-1]}"
+  commands="${commands}"
+
+  # Get available profiles
+  if [ -f ~/.config/ccconfig/profiles.json ]; then
+    profiles=$(node -e "try { const data = require(process.env.HOME + '/.config/ccconfig/profiles.json'); console.log(Object.keys(data.profiles || {}).join(' ')); } catch(e) { }" 2>/dev/null)
+  fi
+
+  case "\${COMP_CWORD}" in
+    1)
+      COMPREPLY=( $(compgen -W "\${commands}" -- \${cur}) )
+      ;;
+    2)
+      case "\${prev}" in
+        use|update|remove|rm)
+          COMPREPLY=( $(compgen -W "\${profiles}" -- \${cur}) )
+          ;;
+        mode)
+          COMPREPLY=( $(compgen -W "settings env" -- \${cur}) )
+          ;;
+        env)
+          COMPREPLY=( $(compgen -W "bash zsh fish sh powershell pwsh dotenv" -- \${cur}) )
+          ;;
+      esac
+      ;;
+    3)
+      case "\${COMP_WORDS[1]}" in
+        use)
+          COMPREPLY=( $(compgen -W "--permanent -p" -- \${cur}) )
+          ;;
+        current)
+          COMPREPLY=( $(compgen -W "--show-secret -s" -- \${cur}) )
+          ;;
+      esac
+      ;;
+  esac
+}
+
+complete -F _ccconfig_completions ccconfig
+`);
+      break;
+
+    case 'zsh':
+      console.log(`# ccconfig zsh completion
+_ccconfig() {
+  local -a commands profiles modes formats
+  commands=(
+    'list:List all configurations'
+    'ls:List all configurations'
+    'add:Add new configuration'
+    'update:Update existing configuration'
+    'use:Switch to specified configuration'
+    'remove:Remove configuration'
+    'rm:Remove configuration'
+    'current:Display current configuration'
+    'mode:View or switch mode'
+    'env:Output environment variables'
+    'edit:Show configuration file location'
+  )
+
+  modes=('settings' 'env')
+  formats=('bash' 'zsh' 'fish' 'sh' 'powershell' 'pwsh' 'dotenv')
+
+  # Get available profiles
+  if [ -f ~/.config/ccconfig/profiles.json ]; then
+    profiles=($(node -e "try { const data = require(process.env.HOME + '/.config/ccconfig/profiles.json'); console.log(Object.keys(data.profiles || {}).join(' ')); } catch(e) { }" 2>/dev/null))
+  fi
+
+  case $CURRENT in
+    2)
+      _describe 'command' commands
+      ;;
+    3)
+      case $words[2] in
+        use|update|remove|rm)
+          _describe 'profile' profiles
+          ;;
+        mode)
+          _describe 'mode' modes
+          ;;
+        env)
+          _describe 'format' formats
+          ;;
+      esac
+      ;;
+    4)
+      case $words[2] in
+        use)
+          _arguments '-p[Write permanently to shell config]' '--permanent[Write permanently to shell config]'
+          ;;
+        current)
+          _arguments '-s[Show full token]' '--show-secret[Show full token]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+compdef _ccconfig ccconfig
+`);
+      break;
+
+    case 'fish':
+      console.log(`# ccconfig fish completion
+
+# Commands
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "list" -d "List all configurations"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "ls" -d "List all configurations"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "add" -d "Add new configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "update" -d "Update existing configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "use" -d "Switch to specified configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "remove" -d "Remove configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "rm" -d "Remove configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "current" -d "Display current configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "mode" -d "View or switch mode"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "env" -d "Output environment variables"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "edit" -d "Show configuration file location"
+
+# Get profile names dynamically
+function __ccconfig_profiles
+  if test -f ~/.config/ccconfig/profiles.json
+    node -e "try { const data = require(process.env.HOME + '/.config/ccconfig/profiles.json'); Object.keys(data.profiles || {}).forEach(k => console.log(k)); } catch(e) { }" 2>/dev/null
+  end
+end
+
+# Profile name completion for use, update, remove
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use update remove rm" -a "(__ccconfig_profiles)"
+
+# Mode options
+complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
+
+# Env format options
+complete -c ccconfig -f -n "__fish_seen_subcommand_from env" -a "bash zsh fish sh powershell pwsh dotenv"
+
+# Flags for use command
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use" -s p -l permanent -d "Write permanently to shell config"
+
+# Flags for current command
+complete -c ccconfig -f -n "__fish_seen_subcommand_from current" -s s -l show-secret -d "Show full token"
+
+# Global flags
+complete -c ccconfig -f -s h -l help -d "Display help information"
+complete -c ccconfig -f -s V -l version -d "Display version information"
+`);
+      break;
+
+    case 'powershell':
+    case 'pwsh':
+      console.log(`# ccconfig PowerShell completion
+
+# Get available profiles
+function Get-CconfigProfiles {
+    $profilesPath = Join-Path $env:USERPROFILE ".config\\ccconfig\\profiles.json"
+    if (Test-Path $profilesPath) {
+        try {
+            $profiles = Get-Content $profilesPath | ConvertFrom-Json
+            return $profiles.profiles.PSObject.Properties.Name
+        } catch {
+            return @()
+        }
+    }
+    return @()
+}
+
+# Register argument completer for ccconfig
+Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
+    param($wordToComplete, $commandAst, $cursorPosition)
+
+    $commands = @('list', 'ls', 'add', 'update', 'use', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion')
+    $modes = @('settings', 'env')
+    $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
+
+    # Parse the command line
+    $tokens = $commandAst.ToString() -split '\\s+'
+    $position = $tokens.Count - 1
+
+    # If we're completing the first argument (command)
+    if ($position -eq 1 -or ($position -eq 2 -and $wordToComplete)) {
+        $commands | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+        }
+        return
+    }
+
+    # Get the command (first argument)
+    $command = if ($tokens.Count -gt 1) { $tokens[1] } else { '' }
+
+    # Second argument completions based on command
+    if ($position -eq 2 -or ($position -eq 3 -and $wordToComplete)) {
+        switch ($command) {
+            { $_ -in 'use', 'update', 'remove', 'rm' } {
+                Get-CconfigProfiles | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+            }
+            'mode' {
+                $modes | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+            }
+            'env' {
+                $formats | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+            }
+            'completion' {
+                @('bash', 'zsh', 'fish', 'powershell', 'pwsh') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
+                }
+            }
+        }
+        return
+    }
+
+    # Flag completions
+    if ($position -ge 3 -and $command -eq 'use') {
+        @('-p', '--permanent') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', 'Write permanently to shell config')
+        }
+    }
+
+    if ($position -ge 2 -and $command -eq 'current') {
+        @('-s', '--show-secret') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+            [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', 'Show full token')
+        }
+    }
+}
+`);
+      break;
+
+    default:
+      console.error(`Error: Unsupported shell: ${shell}`);
+      console.error('Supported shells: bash, zsh, fish, powershell, pwsh');
+      process.exit(1);
+  }
+}
+
+/**
  * Display help information
  */
 function help() {
@@ -1103,6 +1532,8 @@ function help() {
   console.log(
       '  add [name]                                Add new configuration (interactive)');
   console.log(
+      '  update [name]                             Update existing configuration (interactive)');
+  console.log(
       '  use <name> [-p|--permanent]               Switch to specified configuration');
   console.log(
       '  remove|rm <name>                          Remove configuration');
@@ -1114,6 +1545,8 @@ function help() {
       '  env [format]                              Output environment variables (env mode)');
   console.log(
       '  edit                                      Show configuration file location');
+  console.log(
+      '  completion <bash|zsh|fish|pwsh>           Generate shell completion script');
   console.log('');
   console.log('Flags:');
   console.log(
@@ -1170,6 +1603,9 @@ async function main() {
     case 'add':
       await add(filteredArgs[1]);
       break;
+    case 'update':
+      await update(filteredArgs[1]);
+      break;
     case 'remove':
     case 'rm':
       remove(filteredArgs[1]);
@@ -1185,6 +1621,9 @@ async function main() {
       break;
     case 'edit':
       edit();
+      break;
+    case 'completion':
+      completion(filteredArgs[1]);
       break;
     default:
       if (!command) {

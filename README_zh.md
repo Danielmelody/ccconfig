@@ -36,7 +36,8 @@ ccconfig add
 # - ANTHROPIC_BASE_URL
 # - ANTHROPIC_AUTH_TOKEN
 # - ANTHROPIC_API_KEY
-# - 描述
+# - ANTHROPIC_MODEL（可选）
+# - ANTHROPIC_SMALL_FAST_MODEL（可选）
 
 # 3. 切换配置
 ccconfig use work
@@ -73,7 +74,8 @@ ccconfig add
 # - ANTHROPIC_BASE_URL
 # - ANTHROPIC_AUTH_TOKEN
 # - ANTHROPIC_API_KEY
-# - 描述
+# - ANTHROPIC_MODEL（可选）
+# - ANTHROPIC_SMALL_FAST_MODEL（可选）
 
 # 3. 切换配置
 ccconfig use work
@@ -179,6 +181,91 @@ if (Test-Path $cconfigEnv) {
 **注意**: 手动配置允许您通过更改 `current.env` 动态切换配置文件，而 `-p/--permanent` 直接将值写入 shell 配置文件。
 
 ## 高级用法
+
+### 更新现有配置
+
+如果您需要修改已有配置，使用 `update` 命令：
+
+```bash
+# 交互式更新配置
+ccconfig update work
+
+# 工具会：
+# 1. 显示当前值作为默认值
+# 2. 提示输入每个字段
+# 3. 按 Enter 保持当前值，或输入新值来更新
+```
+
+**示例：**
+```bash
+$ ccconfig update work
+Updating configuration 'work'
+Press Enter to keep the current value, or enter a new value to update
+
+ANTHROPIC_BASE_URL [https://api.company.com]: https://new-api.company.com
+ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <按 Enter 保持不变>
+ANTHROPIC_API_KEY []: sk-new-key-123
+ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <按 Enter 保持不变>
+Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
+
+✓ Configuration 'work' updated
+```
+
+**注意：** 更新配置后，如果要立即生效，记得使用 `ccconfig use work` 激活配置。
+
+### Shell 自动补全
+
+ccconfig 支持命令、配置名称和选项的 shell 自动补全，让您更容易发现和使用命令。
+
+**功能：**
+- ✅ 命令补全 (list, add, update, use, remove 等)
+- ✅ 配置名称补全（动态读取您的配置）
+- ✅ 选项补全 (--permanent, --show-secret 等)
+- ✅ 模式补全 (settings, env)
+- ✅ 格式补全 (bash, zsh, fish 等)
+
+**安装：**
+
+```bash
+# Bash
+ccconfig completion bash >> ~/.bashrc
+source ~/.bashrc
+
+# Zsh
+ccconfig completion zsh >> ~/.zshrc
+source ~/.zshrc
+
+# Fish
+ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish
+# Fish 会在下次启动时自动加载
+
+# PowerShell
+ccconfig completion pwsh >> $PROFILE
+# 重新加载配置: . $PROFILE
+```
+
+**PowerShell 注意事项：** 如果遇到 `$PROFILE` 不存在的错误，请先创建它：
+```powershell
+New-Item -Path $PROFILE -ItemType File -Force
+ccconfig completion pwsh >> $PROFILE
+. $PROFILE
+```
+
+**安装补全后的使用示例：**
+
+```bash
+# 输入 'ccconfig' 然后按 TAB 查看所有命令
+ccconfig <TAB>
+# 显示: list, add, update, use, remove, current, mode, env, edit, completion
+
+# 输入 'ccconfig use' 然后按 TAB 查看所有配置
+ccconfig use <TAB>
+# 显示: work, personal, project1 等
+
+# 输入 'ccconfig mode' 然后按 TAB
+ccconfig mode <TAB>
+# 显示: settings, env
+```
 
 ### 快捷别名
 
