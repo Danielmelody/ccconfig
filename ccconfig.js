@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
+const { spawn, execSync } = require('child_process');
 
 // Configuration file paths
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'ccconfig');
@@ -16,6 +17,80 @@ const MODE_FILE = path.join(CONFIG_DIR, 'mode');
 const MODE_SETTINGS = 'settings';  // Directly modify ~/.claude/settings.json
 const MODE_ENV = 'env';            // Use environment variable files
 
+// Environment variable keys
+const ENV_KEYS = {
+  BASE_URL: 'ANTHROPIC_BASE_URL',
+  AUTH_TOKEN: 'ANTHROPIC_AUTH_TOKEN',
+  API_KEY: 'ANTHROPIC_API_KEY',
+  MODEL: 'ANTHROPIC_MODEL',
+  SMALL_FAST_MODEL: 'ANTHROPIC_SMALL_FAST_MODEL'
+};
+
+// Sensitive keys that should be masked
+const SENSITIVE_KEYS = [ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY];
+
+function getProfilesMap(profiles) {
+  return profiles && profiles.profiles ? profiles.profiles : {};
+}
+
+function isProfilesEmpty(profiles) {
+  return !profiles || Object.keys(getProfilesMap(profiles)).length === 0;
+}
+
+function ensureProfilesAvailable({onEmpty} = {}) {
+  const profiles = loadProfiles();
+  if (isProfilesEmpty(profiles)) {
+    if (typeof onEmpty === 'function') {
+      onEmpty();
+    } else {
+      console.error('Error: No configurations found');
+      console.error('Please add a configuration first: ccconfig add <name>');
+    }
+    process.exit(1);
+  }
+  return profiles;
+}
+
+function ensureProfileAvailable(
+    name, {allowEmptyEnv = false, onEmptyProfiles, onMissingProfile, onEmptyEnv} = {}) {
+  const profiles = ensureProfilesAvailable({onEmpty: onEmptyProfiles});
+  const profilesMap = getProfilesMap(profiles);
+  const profile = profilesMap[name];
+
+  if (!profile) {
+    if (typeof onMissingProfile === 'function') {
+      onMissingProfile();
+    } else {
+      console.error(`Error: Configuration '${name}' does not exist`);
+      console.error('');
+      console.error('Run ccconfig list to see available configurations');
+    }
+    process.exit(1);
+  }
+
+  if (!allowEmptyEnv && (!profile.env || Object.keys(profile.env).length === 0)) {
+    if (typeof onEmptyEnv === 'function') {
+      onEmptyEnv();
+    } else {
+      console.error(
+          `Error: Configuration '${name}' has empty environment variables`);
+      console.error('Please edit the configuration file to add env field');
+    }
+    process.exit(1);
+  }
+
+  return {profile, profiles};
+}
+
+// All supported commands
+const COMMANDS = ['list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion'];
+
+// ccconfig markers for shell config files
+const SHELL_MARKERS = {
+  start: '# >>> ccconfig >>>',
+  end: '# <<< ccconfig <<<'
+};
+
 let PACKAGE_VERSION = 'unknown';
 try {
   const packageJson = require('./package.json');
@@ -27,12 +102,225 @@ try {
 }
 
 /**
- * Ensure directory exists
+ * Ensure directory exists with secure permissions
  */
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, {recursive: true});
+    fs.mkdirSync(dir, {recursive: true, mode: 0o700});
+  } else if (os.platform() !== 'win32') {
+    // Ensure existing directory has correct permissions
+    try {
+      fs.chmodSync(dir, 0o700);
+    } catch (e) {
+      // Ignore permission errors - may not own the directory
+    }
   }
+}
+
+/**
+ * Utility: Mask sensitive value for display
+ */
+function maskValue(key, value, shouldMask = true) {
+  const v = String(value ?? '');
+  if (!v || v === '(not set)') return v;
+  if (!shouldMask || !SENSITIVE_KEYS.includes(key)) return v;
+  return v.length > 20 ? v.substring(0, 20) + '...' : v;
+}
+
+/**
+ * Utility: Print environment variable value (with optional masking)
+ */
+function printEnvVar(key, value, mask = true) {
+  const v = String(value ?? '');
+  const displayValue = v ? maskValue(key, v, mask) : '(not set)';
+  console.log(`  ${key}: ${displayValue}`);
+}
+
+/**
+ * Utility: Display environment variables with consistent formatting
+ */
+function displayEnvVars(envVars, mask = true, indent = '  ') {
+  const keys = [ENV_KEYS.BASE_URL, ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY, ENV_KEYS.MODEL, ENV_KEYS.SMALL_FAST_MODEL];
+  for (const key of keys) {
+    if (!(key in envVars)) continue;
+    const value = envVars[key];
+    if (!value && key !== ENV_KEYS.BASE_URL && key !== ENV_KEYS.AUTH_TOKEN && key !== ENV_KEYS.API_KEY) continue;
+    const displayValue = maskValue(key, value, mask);
+    console.log(`${indent}${key}: ${displayValue || '(not set)'}`);
+  }
+}
+
+/**
+ * Utility: Interactive readline helper
+ */
+class ReadlineHelper {
+  constructor() {
+    this.rl = null;
+  }
+
+  ensureInterface() {
+    if (!this.rl) {
+      this.rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout
+      });
+    }
+  }
+
+  async ask(question, defaultValue = '', options = {}) {
+    this.ensureInterface();
+    const { brackets = 'parentheses' } = options;
+    const left = brackets === 'square' ? '[' : '(';
+    const right = brackets === 'square' ? ']' : ')';
+    const suffix = defaultValue ? ` ${left}${defaultValue}${right}` : '';
+
+    return new Promise(resolve => {
+      this.rl.question(`${question}${suffix}: `, answer => {
+        const trimmed = answer.trim();
+        resolve(trimmed || defaultValue);
+      });
+    });
+  }
+
+  async askEnvVars(existingEnv = {}) {
+    const baseUrl = await this.ask(
+      'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
+      existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+      { brackets: existingEnv.ANTHROPIC_BASE_URL ? 'square' : 'parentheses' }
+    );
+
+    const authToken = await this.ask(
+      'ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)',
+      existingEnv.ANTHROPIC_AUTH_TOKEN || '',
+      { brackets: existingEnv.ANTHROPIC_AUTH_TOKEN ? 'square' : 'parentheses' }
+    );
+
+    const apiKey = await this.ask(
+      'ANTHROPIC_API_KEY (press Enter to keep current/set empty)',
+      existingEnv.ANTHROPIC_API_KEY || '',
+      { brackets: existingEnv.ANTHROPIC_API_KEY ? 'square' : 'parentheses' }
+    );
+
+    const model = await this.ask(
+      'ANTHROPIC_MODEL (press Enter to skip/keep current)',
+      existingEnv.ANTHROPIC_MODEL || '',
+      { brackets: existingEnv.ANTHROPIC_MODEL ? 'square' : 'parentheses' }
+    );
+
+    const smallFastModel = await this.ask(
+      'ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)',
+      existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '',
+      { brackets: existingEnv.ANTHROPIC_SMALL_FAST_MODEL ? 'square' : 'parentheses' }
+    );
+
+    const envVars = {
+      [ENV_KEYS.BASE_URL]: baseUrl || '',
+      [ENV_KEYS.AUTH_TOKEN]: authToken || '',
+      [ENV_KEYS.API_KEY]: apiKey || ''
+    };
+
+    if (model) envVars[ENV_KEYS.MODEL] = model;
+    if (smallFastModel) envVars[ENV_KEYS.SMALL_FAST_MODEL] = smallFastModel;
+
+    return envVars;
+  }
+
+  close() {
+    if (this.rl) {
+      this.rl.close();
+      this.rl = null;
+    }
+  }
+}
+
+/**
+ * Utility: Check if terminal is interactive
+ */
+function requireInteractive(commandName) {
+  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
+  if (!isInteractive) {
+    console.error(`Error: Interactive mode required for ${commandName}`);
+    console.error('This command must be run in an interactive terminal');
+    process.exit(1);
+  }
+}
+
+/**
+ * Utility: Display environment variables section for current command
+ */
+function displayEnvSection(envVars, showSecret) {
+  if (!envVars || (!envVars[ENV_KEYS.BASE_URL] && !envVars[ENV_KEYS.AUTH_TOKEN] && !envVars[ENV_KEYS.API_KEY])) {
+    console.log('  (not configured)');
+    return;
+  }
+
+  const normalizedEnv = {
+    [ENV_KEYS.BASE_URL]: envVars[ENV_KEYS.BASE_URL] || '(not set)',
+    [ENV_KEYS.AUTH_TOKEN]: envVars[ENV_KEYS.AUTH_TOKEN] || envVars[ENV_KEYS.API_KEY] || '(not set)',
+    [ENV_KEYS.MODEL]: envVars[ENV_KEYS.MODEL],
+    [ENV_KEYS.SMALL_FAST_MODEL]: envVars[ENV_KEYS.SMALL_FAST_MODEL]
+  };
+
+  // Mask token if needed
+  if (normalizedEnv[ENV_KEYS.AUTH_TOKEN] !== '(not set)' && !showSecret) {
+    const token = normalizedEnv[ENV_KEYS.AUTH_TOKEN];
+    normalizedEnv[ENV_KEYS.AUTH_TOKEN] = token.substring(0, 20) + '...';
+  }
+
+  // Display with aligned columns
+  console.log(`  ${ENV_KEYS.BASE_URL}:   ${normalizedEnv[ENV_KEYS.BASE_URL]}`);
+  console.log(`  ${ENV_KEYS.AUTH_TOKEN}: ${normalizedEnv[ENV_KEYS.AUTH_TOKEN]}`);
+  if (normalizedEnv[ENV_KEYS.MODEL]) {
+    console.log(`  ${ENV_KEYS.MODEL}:      ${normalizedEnv[ENV_KEYS.MODEL]}`);
+  }
+  if (normalizedEnv[ENV_KEYS.SMALL_FAST_MODEL]) {
+    console.log(`  ${ENV_KEYS.SMALL_FAST_MODEL}: ${normalizedEnv[ENV_KEYS.SMALL_FAST_MODEL]}`);
+  }
+}
+
+/**
+ * Validate configuration name
+ * @param {string} name - Configuration name to validate
+ * @param {boolean} allowEmpty - Whether to allow empty names (default: false)
+ * @returns {boolean} - Returns true if valid, exits process if invalid
+ */
+function validateConfigName(name, allowEmpty = false) {
+  if (!name || name.trim() === '') {
+    if (allowEmpty) {
+      return true;
+    }
+    console.error('Error: Configuration name cannot be empty');
+    process.exit(1);
+  }
+
+  // Allow only alphanumeric characters, hyphens, and underscores
+  const CONFIG_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
+  if (!CONFIG_NAME_REGEX.test(name)) {
+    console.error(`Error: Invalid configuration name '${name}'`);
+    console.error('');
+    console.error('Configuration names can only contain:');
+    console.error('  • Letters (a-z, A-Z)');
+    console.error('  • Numbers (0-9)');
+    console.error('  • Hyphens (-)');
+    console.error('  • Underscores (_)');
+    console.error('');
+    console.error('Examples of valid names:');
+    console.error('  • work');
+    console.error('  • personal');
+    console.error('  • project-1');
+    console.error('  • staging_env');
+    process.exit(1);
+  }
+
+  // Limit length to prevent issues
+  const MAX_NAME_LENGTH = 50;
+  if (name.length > MAX_NAME_LENGTH) {
+    console.error(`Error: Configuration name too long (max ${MAX_NAME_LENGTH} characters)`);
+    console.error(`Current length: ${name.length}`);
+    process.exit(1);
+  }
+
+  return true;
 }
 
 /**
@@ -144,11 +432,9 @@ function updateClaudeSettings(envVars) {
   }
 
   // Clear old related environment variables
-  delete settings.env.ANTHROPIC_BASE_URL;
-  delete settings.env.ANTHROPIC_AUTH_TOKEN;
-  delete settings.env.ANTHROPIC_API_KEY;
-  delete settings.env.ANTHROPIC_MODEL;
-  delete settings.env.ANTHROPIC_SMALL_FAST_MODEL;
+  for (const key of Object.values(ENV_KEYS)) {
+    delete settings.env[key];
+  }
 
   // Set new environment variables
   Object.assign(settings.env, envVars);
@@ -162,8 +448,15 @@ function updateClaudeSettings(envVars) {
 function writeEnvFile(envVars) {
   try {
     ensureDir(CONFIG_DIR);
-    const lines =
-        Object.entries(envVars).map(([key, value]) => `${key}=${value}`);
+    const lines = Object.entries(envVars).map(([key, value]) => {
+      // Escape special characters to prevent injection
+      const escapedValue = String(value ?? '')
+        .replace(/\\/g, '\\\\')
+        .replace(/\n/g, '\\n')
+        .replace(/\r/g, '\\r')
+        .replace(/\t/g, '\\t');
+      return `${key}=${escapedValue}`;
+    });
     const content = lines.join('\n') + '\n';
     fs.writeFileSync(ENV_FILE, content, 'utf-8');
 
@@ -188,9 +481,18 @@ function readEnvFile() {
     const content = fs.readFileSync(ENV_FILE, 'utf-8');
     const env = {};
     content.split('\n').forEach(line => {
-      const match = line.match(/^([^=]+)=(.*)$/);
+      // Only accept valid environment variable names: starts with letter or underscore,
+      // followed by letters, numbers, or underscores
+      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
       if (match) {
-        env[match[1]] = match[2];
+        // Unescape special characters
+        // IMPORTANT: Must unescape \\\\ first to avoid double-unescaping
+        const unescapedValue = match[2]
+          .replace(/\\\\/g, '\\')
+          .replace(/\\n/g, '\n')
+          .replace(/\\r/g, '\r')
+          .replace(/\\t/g, '\t');
+        env[match[1]] = unescapedValue;
       }
     });
     return env;
@@ -352,249 +654,109 @@ function list() {
  * Add new configuration
  */
 async function add(name) {
-  // Auto-initialize if needed
   initIfNeeded();
+  requireInteractive('adding configurations');
 
-  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
-
-  if (!isInteractive) {
-    console.error('Error: Interactive mode required for adding configurations');
-    console.error('This command must be run in an interactive terminal');
-    process.exit(1);
-  }
-
-  let rl = null;
-
-  const askQuestion = (question, defaultValue = '') => {
-    if (!rl) {
-      rl = readline.createInterface(
-          {input: process.stdin, output: process.stdout});
-    }
-    return new Promise(resolve => {
-      const suffix = defaultValue ? ` (${defaultValue})` : '';
-      rl.question(`${question}${suffix}: `, answer => {
-        const trimmed = answer.trim();
-        resolve(trimmed ? trimmed : defaultValue.trim());
-      });
-    });
-  };
-
-  let baseUrl, authToken, apiKey, model, smallFastModel;
-  let profiles;
+  const helper = new ReadlineHelper();
 
   try {
     if (!name) {
-      name = await askQuestion('Please enter configuration name (e.g., work)');
+      name = await helper.ask('Please enter configuration name (e.g., work)');
     }
 
-    if (!name) {
-      console.error('Error: Configuration name cannot be empty');
-      process.exit(1);
-    }
+    validateConfigName(name);
 
-    // Check if configuration already exists before asking for details
-    profiles = loadProfiles() || {profiles: {}};
+    const profiles = loadProfiles() || {profiles: {}};
+    const profilesMap = getProfilesMap(profiles);
 
-    if (profiles.profiles[name]) {
+    if (profilesMap[name]) {
       console.error(`Error: Configuration '${name}' already exists`);
-      console.error('To update, please edit the configuration file directly');
+      console.error('');
+      console.error('To modify this configuration, use one of:');
+      console.error(`  ccconfig update ${name}    # Interactive update`);
+      console.error(`  ccconfig edit              # Manual edit`);
       process.exit(1);
     }
 
-    baseUrl = await askQuestion(
-        'Please enter ANTHROPIC_BASE_URL (press Enter for default)',
-        'https://api.anthropic.com');
+    console.log('Please enter the following information:');
+    console.log('');
 
-    authToken =
-        await askQuestion('Please enter ANTHROPIC_AUTH_TOKEN (press Enter to set as empty)');
+    const envVars = await helper.askEnvVars();
 
-    apiKey = await askQuestion('Please enter ANTHROPIC_API_KEY (press Enter to set as empty)');
+    profiles.profiles[name] = {env: envVars};
+    saveProfiles(profiles);
 
-    model = await askQuestion('Please enter ANTHROPIC_MODEL (press Enter to skip)');
-
-    smallFastModel = await askQuestion('Please enter ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip)');
+    console.log(`✓ Configuration '${name}' added`);
+    console.log('');
+    console.log('Run the following command to activate:');
+    console.log(`  ccconfig use ${name}`);
+    console.log('');
+    console.log('Saved environment variables:');
+    displayEnvVars(envVars);
+    console.log('');
+    console.log('This information has been saved to:');
+    console.log(`  ${PROFILES_FILE}`);
+    console.log('You can edit this file directly to further customize the profile:');
+    console.log(`  vim ${PROFILES_FILE}`);
+    console.log('Or run ccconfig edit to open it with your preferred editor');
   } finally {
-    if (rl) {
-      rl.close();
-    }
+    helper.close();
   }
-
-  const envVars = {
-    ANTHROPIC_BASE_URL: baseUrl || '',
-    ANTHROPIC_AUTH_TOKEN: authToken || '',
-    ANTHROPIC_API_KEY: apiKey || ''
-  };
-
-  // Add optional model variables if provided
-  if (model) {
-    envVars.ANTHROPIC_MODEL = model;
-  }
-  if (smallFastModel) {
-    envVars.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
-  }
-
-  profiles.profiles[name] = {env: envVars};
-
-  saveProfiles(profiles);
-  console.log(`✓ Configuration '${name}' added`);
-  console.log('');
-  console.log('Run the following command to activate:');
-  console.log(`  ccconfig use ${name}`);
-  console.log('');
-  console.log('Saved environment variables:');
-  const safePrint = (key, value, mask = true) => {
-    if (!value) {
-      console.log(`  ${key}: (not set)`);
-      return;
-    }
-    if (!mask) {
-      console.log(`  ${key}: ${value}`);
-      return;
-    }
-    const masked = value.length > 20 ? value.substring(0, 20) + '...' : value;
-    console.log(`  ${key}: ${masked}`);
-  };
-  safePrint('ANTHROPIC_BASE_URL', envVars.ANTHROPIC_BASE_URL, false);
-  safePrint('ANTHROPIC_AUTH_TOKEN', envVars.ANTHROPIC_AUTH_TOKEN);
-  safePrint('ANTHROPIC_API_KEY', envVars.ANTHROPIC_API_KEY);
-  if (envVars.ANTHROPIC_MODEL) {
-    safePrint('ANTHROPIC_MODEL', envVars.ANTHROPIC_MODEL, false);
-  }
-  if (envVars.ANTHROPIC_SMALL_FAST_MODEL) {
-    safePrint('ANTHROPIC_SMALL_FAST_MODEL', envVars.ANTHROPIC_SMALL_FAST_MODEL, false);
-  }
-  console.log('');
-  console.log('This information has been saved to:');
-  console.log(`  ${PROFILES_FILE}`);
-  console.log(
-      'You can edit this file directly to further customize the profile:');
-  console.log(`  vim ${PROFILES_FILE}`);
-  console.log('Or run ccconfig edit to open it with your preferred editor');
 }
 
 /**
  * Update existing configuration
  */
 async function update(name) {
-  // Auto-initialize if needed
   initIfNeeded();
+  requireInteractive('updating configurations');
 
-  const isInteractive = process.stdin.isTTY && process.stdout.isTTY;
-
-  if (!isInteractive) {
-    console.error('Error: Interactive mode required for updating configurations');
-    console.error('This command must be run in an interactive terminal');
-    process.exit(1);
-  }
-
-  let rl = null;
-
-  const askQuestion = (question, defaultValue = '') => {
-    if (!rl) {
-      rl = readline.createInterface(
-          {input: process.stdin, output: process.stdout});
-    }
-    return new Promise(resolve => {
-      const suffix = defaultValue ? ` [${defaultValue}]` : '';
-      rl.question(`${question}${suffix}: `, answer => {
-        const trimmed = answer.trim();
-        resolve(trimmed ? trimmed : defaultValue);
-      });
-    });
-  };
-
-  let baseUrl, authToken, apiKey, model, smallFastModel;
-  let profiles;
+  const helper = new ReadlineHelper();
 
   try {
     if (!name) {
-      name = await askQuestion('Please enter configuration name to update');
+      name = await helper.ask('Please enter configuration name to update');
     }
 
-    if (!name) {
-      console.error('Error: Configuration name cannot be empty');
-      process.exit(1);
-    }
+    validateConfigName(name);
 
-    // Check if configuration exists
-    profiles = loadProfiles() || {profiles: {}};
+    const {profile, profiles} = ensureProfileAvailable(name, {
+      allowEmptyEnv: true,
+      onEmptyProfiles: () => {
+        console.error('Error: Configuration file does not exist');
+        process.exit(1);
+      },
+      onMissingProfile: () => {
+        console.error(`Error: Configuration '${name}' does not exist`);
+        console.error('');
+        console.error('Run ccconfig list to see available configurations');
+        console.error(`Or use 'ccconfig add ${name}' to create a new configuration`);
+        process.exit(1);
+      }
+    });
 
-    if (!profiles.profiles[name]) {
-      console.error(`Error: Configuration '${name}' does not exist`);
-      console.error('Run ccconfig list to see available configurations');
-      console.error(`Or use 'ccconfig add ${name}' to create a new configuration`);
-      process.exit(1);
-    }
-
-    const existingProfile = profiles.profiles[name];
-    const existingEnv = existingProfile.env || {};
+    const existingEnv = profile.env || {};
 
     console.log(`Updating configuration '${name}'`);
     console.log('Press Enter to keep current value/default, or enter new value to update');
     console.log('');
 
-    baseUrl = await askQuestion(
-        'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
-        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
+    const envVars = await helper.askEnvVars(existingEnv);
 
-    authToken =
-        await askQuestion('ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)', existingEnv.ANTHROPIC_AUTH_TOKEN || '');
+    const profilesMap = getProfilesMap(profiles);
+    profilesMap[name] = {env: envVars};
+    saveProfiles(profiles);
 
-    apiKey = await askQuestion('ANTHROPIC_API_KEY (press Enter to keep current/set empty)', existingEnv.ANTHROPIC_API_KEY || '');
-
-    model = await askQuestion('ANTHROPIC_MODEL (press Enter to skip/keep current)', existingEnv.ANTHROPIC_MODEL || '');
-
-    smallFastModel = await askQuestion('ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)', existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '');
+    console.log(`✓ Configuration '${name}' updated`);
+    console.log('');
+    console.log('Updated environment variables:');
+    displayEnvVars(envVars);
+    console.log('');
+    console.log('Run the following command to activate:');
+    console.log(`  ccconfig use ${name}`);
   } finally {
-    if (rl) {
-      rl.close();
-    }
+    helper.close();
   }
-
-  const envVars = {
-    ANTHROPIC_BASE_URL: baseUrl || '',
-    ANTHROPIC_AUTH_TOKEN: authToken || '',
-    ANTHROPIC_API_KEY: apiKey || ''
-  };
-
-  // Add optional model variables if provided
-  if (model) {
-    envVars.ANTHROPIC_MODEL = model;
-  }
-  if (smallFastModel) {
-    envVars.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
-  }
-
-  profiles.profiles[name] = {env: envVars};
-
-  saveProfiles(profiles);
-  console.log(`✓ Configuration '${name}' updated`);
-  console.log('');
-  console.log('Updated environment variables:');
-  const safePrint = (key, value, mask = true) => {
-    if (!value) {
-      console.log(`  ${key}: (not set)`);
-      return;
-    }
-    if (!mask) {
-      console.log(`  ${key}: ${value}`);
-      return;
-    }
-    const masked = value.length > 20 ? value.substring(0, 20) + '...' : value;
-    console.log(`  ${key}: ${masked}`);
-  };
-  safePrint('ANTHROPIC_BASE_URL', envVars.ANTHROPIC_BASE_URL, false);
-  safePrint('ANTHROPIC_AUTH_TOKEN', envVars.ANTHROPIC_AUTH_TOKEN);
-  safePrint('ANTHROPIC_API_KEY', envVars.ANTHROPIC_API_KEY);
-  if (envVars.ANTHROPIC_MODEL) {
-    safePrint('ANTHROPIC_MODEL', envVars.ANTHROPIC_MODEL, false);
-  }
-  if (envVars.ANTHROPIC_SMALL_FAST_MODEL) {
-    safePrint('ANTHROPIC_SMALL_FAST_MODEL', envVars.ANTHROPIC_SMALL_FAST_MODEL, false);
-  }
-  console.log('');
-  console.log('Run the following command to activate:');
-  console.log(`  ccconfig use ${name}`);
 }
 
 /**
@@ -607,19 +769,20 @@ function remove(name) {
     process.exit(1);
   }
 
-  const profiles = loadProfiles();
+  // Validate configuration name
+  validateConfigName(name);
 
-  if (!profiles) {
-    console.error('Error: Configuration file does not exist');
-    process.exit(1);
-  }
+  const {profiles} = ensureProfileAvailable(name, {
+    allowEmptyEnv: true,
+    onEmptyProfiles: () => {
+      console.error('Error: Configuration file does not exist');
+    },
+    onMissingProfile: () => {
+      console.error(`Error: Configuration '${name}' does not exist`);
+    }
+  });
 
-  if (!profiles.profiles[name]) {
-    console.error(`Error: Configuration '${name}' does not exist`);
-    process.exit(1);
-  }
-
-  delete profiles.profiles[name];
+  delete getProfilesMap(profiles)[name];
   saveProfiles(profiles);
   console.log(`✓ Configuration '${name}' removed`);
 }
@@ -628,94 +791,136 @@ function remove(name) {
  * Detect current shell and return recommended activation command
  */
 function detectShellCommand() {
-  const shellPath = (process.env.SHELL || '').toLowerCase();
-
-  if (process.env.FISH_VERSION || shellPath.includes('fish')) {
-    return {shell: 'fish', command: 'ccconfig env fish | source'};
+  const shellType = ShellUtils.detectType();
+  if (!shellType) {
+    return {shell: null, command: null};
   }
+  const command = ShellUtils.getActivationCommand(shellType);
+  const shellName = shellType === 'powershell' ? 'PowerShell' : shellType;
+  return {shell: shellName, command};
+}
 
-  if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
-      shellPath.includes('zsh')) {
-    return {shell: 'zsh', command: 'eval $(ccconfig env bash)'};
-  }
-
-  if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
-      shellPath.includes('pwsh') || shellPath.includes('powershell')) {
-    return {shell: 'PowerShell', command: 'ccconfig env pwsh | iex'};
-  }
-
-  if (shellPath.includes('bash')) {
-    return {shell: 'bash', command: 'eval $(ccconfig env bash)'};
-  }
-
-  if (process.platform === 'win32') {
-    const comSpec = (process.env.ComSpec || '').toLowerCase();
-    if (comSpec.includes('powershell')) {
-      return {shell: 'PowerShell', command: 'ccconfig env pwsh | iex'};
+/**
+ * Shell utilities - unified shell detection, escaping, and formatting
+ */
+const ShellUtils = {
+  // Escape functions for different shells
+  escape: {
+    posix: (value) => {
+      const str = value == null ? '' : String(value);
+      return `'${str.replace(/'/g, `'"'"'`)}'`;
+    },
+    fish: (value) => {
+      const str = value == null ? '' : String(value);
+      return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
+    },
+    pwsh: (value) => {
+      const str = value == null ? '' : String(value);
+      return `'${str.replace(/'/g, `''`)}'`;
     }
+  },
+
+  // Detect current shell type
+  detectType: () => {
+    const shellPath = (process.env.SHELL || '').toLowerCase();
+
+    if (process.env.FISH_VERSION || shellPath.includes('fish')) {
+      return 'fish';
+    }
+    if (process.env.ZSH_NAME || process.env.ZSH_VERSION || shellPath.includes('zsh')) {
+      return 'zsh';
+    }
+    if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL || shellPath.includes('pwsh') || shellPath.includes('powershell')) {
+      return 'powershell';
+    }
+    if (shellPath.includes('bash')) {
+      return 'bash';
+    }
+    if (process.platform === 'win32') {
+      const comSpec = (process.env.ComSpec || '').toLowerCase();
+      if (comSpec.includes('powershell')) {
+        return 'powershell';
+      }
+    }
+    return null;
+  },
+
+  // Get shell config file path
+  getConfigPath: (shellType) => {
+    const homeDir = os.homedir();
+    const configs = {
+      fish: path.join(homeDir, '.config', 'fish', 'config.fish'),
+      zsh: path.join(homeDir, '.zshrc'),
+      bash: process.platform === 'darwin'
+        ? (fs.existsSync(path.join(homeDir, '.bash_profile')) || !fs.existsSync(path.join(homeDir, '.bashrc'))
+          ? path.join(homeDir, '.bash_profile')
+          : path.join(homeDir, '.bashrc'))
+        : path.join(homeDir, '.bashrc'),
+      powershell: process.platform === 'win32'
+        ? path.join(process.env.USERPROFILE || homeDir, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
+        : path.join(homeDir, '.config', 'powershell', 'profile.ps1')
+    };
+    return configs[shellType];
+  },
+
+  // Get activation command for specific shell
+  getActivationCommand: (shellType) => {
+    const commands = {
+      fish: 'ccconfig env fish | source',
+      zsh: 'eval $(ccconfig env bash)',
+      bash: 'eval $(ccconfig env bash)',
+      powershell: 'ccconfig env pwsh | iex'
+    };
+    return commands[shellType];
+  },
+
+  // Format environment variables for specific shell
+  formatEnvVars: (envVars, format) => {
+    const lines = [];
+    for (const [key, value] of Object.entries(envVars)) {
+      switch (format) {
+        case 'fish':
+          lines.push(`set -gx ${key} "${ShellUtils.escape.fish(value)}"`);
+          break;
+        case 'bash':
+        case 'zsh':
+        case 'sh':
+          lines.push(`export ${key}=${ShellUtils.escape.posix(value)}`);
+          break;
+        case 'powershell':
+        case 'pwsh':
+          lines.push(`$env:${key}=${ShellUtils.escape.pwsh(value)}`);
+          break;
+        case 'dotenv':
+          const renderedValue = value == null ? '' : String(value);
+          const escapedValue = renderedValue
+            .replace(/\\/g, '\\\\')
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '\\r')
+            .replace(/\t/g, '\\t');
+          lines.push(`${key}=${escapedValue}`);
+          break;
+      }
+    }
+    return lines;
   }
+};
 
-  return {shell: null, command: null};
-}
-
-function escapePosix(value) {
-  const str = value == null ? '' : String(value);
-  return `'${str.replace(/'/g, `'"'"'`)}'`;
-}
-
-function escapeFish(value) {
-  const str = value == null ? '' : String(value);
-  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
-}
-
-function escapePwsh(value) {
-  const str = value == null ? '' : String(value);
-  return `'${str.replace(/'/g, `''`)}'`;
-}
+// Legacy function wrappers for backward compatibility
+function escapePosix(value) { return ShellUtils.escape.posix(value); }
+function escapeFish(value) { return ShellUtils.escape.fish(value); }
+function escapePwsh(value) { return ShellUtils.escape.pwsh(value); }
 
 /**
  * Detect shell type and config file path
  */
 function detectShellConfig() {
-  const shellPath = (process.env.SHELL || '').toLowerCase();
-  const homeDir = os.homedir();
-
-  if (process.env.FISH_VERSION || shellPath.includes('fish')) {
-    const configPath = path.join(homeDir, '.config', 'fish', 'config.fish');
-    return {shell: 'fish', configPath, detected: true};
+  const shellType = ShellUtils.detectType();
+  if (!shellType) {
+    return {shell: null, configPath: null, detected: false};
   }
-
-  if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
-      shellPath.includes('zsh')) {
-    const configPath = path.join(homeDir, '.zshrc');
-    return {shell: 'zsh', configPath, detected: true};
-  }
-
-  if (shellPath.includes('bash')) {
-    if (process.platform === 'darwin') {
-      const bashProfile = path.join(homeDir, '.bash_profile');
-      const bashrc = path.join(homeDir, '.bashrc');
-      const configPath = fs.existsSync(bashProfile) || !fs.existsSync(bashrc) ?
-          bashProfile :
-          bashrc;
-      return {shell: 'bash', configPath, detected: true};
-    }
-    const configPath = path.join(homeDir, '.bashrc');
-    return {shell: 'bash', configPath, detected: true};
-  }
-
-  if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
-      shellPath.includes('pwsh') || shellPath.includes('powershell')) {
-    // PowerShell profile path varies by OS
-    const configPath = process.platform === 'win32' ?
-        path.join(
-            process.env.USERPROFILE || homeDir, 'Documents', 'PowerShell',
-            'Microsoft.PowerShell_profile.ps1') :
-        path.join(homeDir, '.config', 'powershell', 'profile.ps1');
-    return {shell: 'powershell', configPath, detected: true};
-  }
-
-  return {shell: null, configPath: null, detected: false};
+  const configPath = ShellUtils.getConfigPath(shellType);
+  return {shell: shellType, configPath, detected: true};
 }
 
 /**
@@ -732,37 +937,20 @@ async function writePermanentEnv(envVars) {
   }
 
   const {shell, configPath} = shellConfig;
-  const marker = '# >>> ccconfig >>>';
-  const markerEnd = '# <<< ccconfig <<<';
+  const marker = SHELL_MARKERS.start;
+  const markerEnd = SHELL_MARKERS.end;
 
-  // Generate environment variable lines
-  let envBlock = '';
-  switch (shell) {
-    case 'fish':
-      envBlock = `${marker}\n`;
-      for (const [key, value] of Object.entries(envVars)) {
-        envBlock += `set -gx ${key} "${escapeFish(value)}"\n`;
-      }
-      envBlock += `${markerEnd}\n`;
-      break;
-
-    case 'bash':
-    case 'zsh':
-      envBlock = `${marker}\n`;
-      for (const [key, value] of Object.entries(envVars)) {
-        envBlock += `export ${key}=${escapePosix(value)}\n`;
-      }
-      envBlock += `${markerEnd}\n`;
-      break;
-
-    case 'powershell':
-      envBlock = `${marker}\n`;
-      for (const [key, value] of Object.entries(envVars)) {
-        envBlock += `$env:${key}=${escapePwsh(value)}\n`;
-      }
-      envBlock += `${markerEnd}\n`;
-      break;
+  // Generate environment variable lines (real and masked)
+  const maskedEnvVars = {};
+  for (const [key, value] of Object.entries(envVars)) {
+    maskedEnvVars[key] = maskValue(key, value, true);
   }
+
+  const envLines = ShellUtils.formatEnvVars(envVars, shell);
+  const maskedEnvLines = ShellUtils.formatEnvVars(maskedEnvVars, shell);
+
+  const envBlock = `${marker}\n${envLines.join('\n')}\n${markerEnd}\n`;
+  const maskedEnvBlock = `${marker}\n${maskedEnvLines.join('\n')}\n${markerEnd}\n`;
 
   // Display warning and confirmation
   console.log('');
@@ -773,7 +961,7 @@ async function writePermanentEnv(envVars) {
   console.log('');
   console.log('The following block will be added/updated:');
   console.log('───────────────────────────────────────────');
-  console.log(envBlock.trim());
+  console.log(maskedEnvBlock.trim());
   console.log('───────────────────────────────────────────');
   console.log('');
   console.log('What this does:');
@@ -891,29 +1079,25 @@ async function writePermanentEnv(envVars) {
  * Switch configuration
  */
 async function use(name, options = {}) {
-  const profiles = loadProfiles();
+  // Validate configuration name
+  validateConfigName(name);
 
-  if (!profiles || !profiles.profiles ||
-      Object.keys(profiles.profiles).length === 0) {
-    console.error('Error: No configurations found');
-    console.error('Please add a configuration first: ccconfig add <name>');
-    process.exit(1);
-  }
-
-  if (!profiles.profiles[name]) {
-    console.error(`Error: Configuration '${name}' does not exist`);
-    console.error('Run ccconfig list to see available configurations');
-    process.exit(1);
-  }
-
-  const profile = profiles.profiles[name];
-
-  if (!profile.env || Object.keys(profile.env).length === 0) {
-    console.error(
-        `Error: Configuration '${name}' has empty environment variables`);
-    console.error('Please edit the configuration file to add env field');
-    process.exit(1);
-  }
+  const {profile} = ensureProfileAvailable(name, {
+    onEmptyProfiles: () => {
+      console.error('Error: No configurations found');
+      console.error('Please add a configuration first: ccconfig add <name>');
+    },
+    onMissingProfile: () => {
+      console.error(`Error: Configuration '${name}' does not exist`);
+      console.error('');
+      console.error('Run ccconfig list to see available configurations');
+    },
+    onEmptyEnv: () => {
+      console.error(
+          `Error: Configuration '${name}' has empty environment variables`);
+      console.error('Please edit the configuration file to add env field');
+    }
+  });
 
   const mode = getMode();
   const permanent = options.permanent || false;
@@ -924,11 +1108,7 @@ async function use(name, options = {}) {
 
     console.log(`✓ Switched to configuration: ${name} (settings mode)`);
     console.log(`  Environment variables:`);
-    for (const [key, value] of Object.entries(profile.env)) {
-      const displayValue =
-          value.length > 20 ? value.substring(0, 20) + '...' : value;
-      console.log(`    ${key}: ${displayValue}`);
-    }
+    displayEnvVars(profile.env, true, '    ');
     console.log('');
     console.log('Configuration written to ~/.claude/settings.json');
     console.log('Restart Claude Code to make configuration take effect');
@@ -944,11 +1124,7 @@ async function use(name, options = {}) {
 
     console.log(`✓ Switched to configuration: ${name} (env mode)`);
     console.log(`  Environment variables:`);
-    for (const [key, value] of Object.entries(profile.env)) {
-      const displayValue =
-          value.length > 20 ? value.substring(0, 20) + '...' : value;
-      console.log(`    ${key}: ${displayValue}`);
-    }
+    displayEnvVars(profile.env, true, '    ');
     console.log('');
     console.log(`Environment variable file updated: ${ENV_FILE}`);
 
@@ -1029,74 +1205,17 @@ function current(showSecret = false) {
 
   // Display settings.json configuration
   console.log('【1】~/.claude/settings.json:');
-  if (settings.env &&
-      (settings.env.ANTHROPIC_BASE_URL || settings.env.ANTHROPIC_AUTH_TOKEN)) {
-    const baseUrl = settings.env.ANTHROPIC_BASE_URL || '(not set)';
-    const authToken = settings.env.ANTHROPIC_AUTH_TOKEN || '(not set)';
-    const maskedToken = (authToken === '(not set)' || showSecret) ?
-        authToken :
-        authToken.substring(0, 20) + '...';
-
-    console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
-    console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
-    if (settings.env.ANTHROPIC_MODEL) {
-      console.log(`  ANTHROPIC_MODEL:      ${settings.env.ANTHROPIC_MODEL}`);
-    }
-    if (settings.env.ANTHROPIC_SMALL_FAST_MODEL) {
-      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${settings.env.ANTHROPIC_SMALL_FAST_MODEL}`);
-    }
-  } else {
-    console.log('  (not configured)');
-  }
+  displayEnvSection(settings.env, showSecret);
   console.log('');
 
   // Display environment variable file configuration
   console.log(`【2】Environment Variables File (${ENV_FILE}):`);
-  if (envFile &&
-      (envFile.ANTHROPIC_BASE_URL || envFile.ANTHROPIC_AUTH_TOKEN ||
-       envFile.ANTHROPIC_API_KEY)) {
-    const baseUrl = envFile.ANTHROPIC_BASE_URL || '(not set)';
-    const authToken = envFile.ANTHROPIC_AUTH_TOKEN ||
-        envFile.ANTHROPIC_API_KEY || '(not set)';
-    const maskedToken = (authToken === '(not set)' || showSecret) ?
-        authToken :
-        authToken.substring(0, 20) + '...';
-
-    console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
-    console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
-    if (envFile.ANTHROPIC_MODEL) {
-      console.log(`  ANTHROPIC_MODEL:      ${envFile.ANTHROPIC_MODEL}`);
-    }
-    if (envFile.ANTHROPIC_SMALL_FAST_MODEL) {
-      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${envFile.ANTHROPIC_SMALL_FAST_MODEL}`);
-    }
-  } else {
-    console.log('  (not configured)');
-  }
+  displayEnvSection(envFile, showSecret);
   console.log('');
 
   // Display current process environment variables
   console.log('【3】Current Process Environment Variables:');
-  if (processEnv.ANTHROPIC_BASE_URL || processEnv.ANTHROPIC_AUTH_TOKEN ||
-      processEnv.ANTHROPIC_API_KEY) {
-    const baseUrl = processEnv.ANTHROPIC_BASE_URL || '(not set)';
-    const authToken = processEnv.ANTHROPIC_AUTH_TOKEN ||
-        processEnv.ANTHROPIC_API_KEY || '(not set)';
-    const maskedToken = (authToken === '(not set)' || showSecret) ?
-        authToken :
-        authToken.substring(0, 20) + '...';
-
-    console.log(`  ANTHROPIC_BASE_URL:   ${baseUrl}`);
-    console.log(`  ANTHROPIC_AUTH_TOKEN: ${maskedToken}`);
-    if (processEnv.ANTHROPIC_MODEL) {
-      console.log(`  ANTHROPIC_MODEL:      ${processEnv.ANTHROPIC_MODEL}`);
-    }
-    if (processEnv.ANTHROPIC_SMALL_FAST_MODEL) {
-      console.log(`  ANTHROPIC_SMALL_FAST_MODEL: ${processEnv.ANTHROPIC_SMALL_FAST_MODEL}`);
-    }
-  } else {
-    console.log('  (not set)');
-  }
+  displayEnvSection(processEnv, showSecret);
   console.log('');
 
   // Display notes
@@ -1200,45 +1319,147 @@ function env(format = 'bash') {
   const envVars = getActiveEnvVars();
 
   if (!envVars || Object.keys(envVars).length === 0) {
-    console.error(
-        'Error: No available environment variable configuration found');
-    console.error(
-        'Please run ccconfig use <name> to select a configuration first');
+    console.error('Error: No available environment variable configuration found');
+    console.error('Please run ccconfig use <name> to select a configuration first');
     process.exit(1);
   }
 
-  // Output all environment variables
-  switch (format) {
-    case 'fish':
-      for (const [key, value] of Object.entries(envVars)) {
-        console.log(`set -gx ${key} "${escapeFish(value)}"`);
-      }
-      break;
-    case 'bash':
-    case 'zsh':
-    case 'sh':
-      for (const [key, value] of Object.entries(envVars)) {
-        console.log(`export ${key}=${escapePosix(value)}`);
-      }
-      break;
-    case 'powershell':
-    case 'pwsh':
-      for (const [key, value] of Object.entries(envVars)) {
-        console.log(`$env:${key}=${escapePwsh(value)}`);
-      }
-      break;
-    case 'dotenv':
-      for (const [key, value] of Object.entries(envVars)) {
-        const renderedValue = value == null ? '' : String(value);
-        console.log(`${key}=${renderedValue}`);
-      }
-      break;
-    default:
-      console.error(`Error: Unsupported format: ${format}`);
-      console.error(
-          'Supported formats: fish, bash, zsh, sh, powershell, pwsh, dotenv');
-      process.exit(1);
+  const supportedFormats = ['fish', 'bash', 'zsh', 'sh', 'powershell', 'pwsh', 'dotenv'];
+  if (!supportedFormats.includes(format)) {
+    console.error(`Error: Unsupported format: ${format}`);
+    console.error(`Supported formats: ${supportedFormats.join(', ')}`);
+    process.exit(1);
   }
+
+  const lines = ShellUtils.formatEnvVars(envVars, format);
+  lines.forEach(line => console.log(line));
+}
+
+/**
+ * Start Claude Code with specified profile (internal implementation)
+ * @param {string} name - Profile name
+ * @param {Array} extraArgs - Additional arguments to pass to Claude
+ * @param {Object} options - Options object
+ * @param {boolean} options.safe - Whether to run in safe mode (default: false)
+ */
+function startClaude(name, extraArgs = [], options = {}) {
+  const { safe = false } = options;
+  const commandName = safe ? 'safe-start' : 'start';
+
+  if (!name) {
+    console.error('Error: Missing configuration name');
+    console.error(`Usage: ccconfig ${commandName} <name> [claude-args...]`);
+    process.exit(1);
+  }
+
+  // Validate configuration name
+  validateConfigName(name);
+
+  const {profile} = ensureProfileAvailable(name, {
+    onEmptyProfiles: () => {
+      console.error('Error: No configurations found');
+      console.error('Please add a configuration first: ccconfig add <name>');
+    },
+    onMissingProfile: () => {
+      console.error(`Error: Configuration '${name}' does not exist`);
+      console.error('Run ccconfig list to see available configurations');
+    },
+    onEmptyEnv: () => {
+      console.error(
+          `Error: Configuration '${name}' has empty environment variables`);
+      console.error('Please edit the configuration file to add env field');
+    }
+  });
+
+  // Check if claude binary exists before proceeding
+  try {
+    const command = process.platform === 'win32' ? 'where claude' : 'which claude';
+    execSync(command, { stdio: 'pipe' });
+  } catch (err) {
+    console.error('Error: Claude Code CLI not found');
+    console.error('');
+    console.error('Please make sure Claude Code CLI is installed:');
+    console.error('  npm install -g claude-code');
+    process.exit(1);
+  }
+
+  // Display startup message
+  const modeLabel = safe ? ' (safe mode)' : '';
+  console.log(`Starting Claude Code with profile: ${name}${modeLabel}`);
+  console.log('Environment variables:');
+  for (const [key, value] of Object.entries(profile.env)) {
+    const strValue = String(value ?? '');
+    const displayValue =
+        strValue.length > 20 ? strValue.substring(0, 20) + '...' : strValue;
+    console.log(`  ${key}: ${displayValue}`);
+  }
+
+  // Build Claude arguments based on mode
+  const claudeArgs = safe ? extraArgs : ['--dangerously-skip-permissions', ...extraArgs];
+
+  // Display mode-specific notes
+  console.log('');
+  if (safe) {
+    console.log('Note: Running in safe mode (permission confirmation required)');
+    console.log('      Claude Code will ask for confirmation before executing commands');
+    console.log('      For automatic execution, use "ccconfig start" instead');
+  } else {
+    console.log('Note: Starting with --dangerously-skip-permissions flag enabled');
+    console.log('      This allows Claude Code to execute commands without confirmation prompts');
+    console.log('      Only use this with profiles you trust');
+  }
+  console.log('');
+
+  if (extraArgs.length > 0) {
+    const argsLabel = safe ? 'Arguments' : 'Additional arguments';
+    console.log(`${argsLabel}: ${extraArgs.join(' ')}`);
+    console.log('');
+  }
+
+  // Merge profile env vars with current process env
+  // Normalize all profile env values to strings (spawn requires string values)
+  const normalizedEnv = {};
+  for (const [key, value] of Object.entries(profile.env)) {
+    normalizedEnv[key] = String(value ?? '');
+  }
+  const envVars = {...process.env, ...normalizedEnv};
+
+  // Spawn claude process
+  const claude = spawn('claude', claudeArgs, {
+    env: envVars,
+    stdio: 'inherit'  // Inherit stdin, stdout, stderr from parent process
+  });
+
+  // Handle process exit
+  claude.on('close', (code) => {
+    if (code !== 0 && code !== null) {
+      console.error(`Claude Code exited with code ${code}`);
+      process.exit(code);
+    }
+    process.exit(0);
+  });
+
+  claude.on('error', (err) => {
+    console.error(`Error starting Claude Code: ${err.message}`);
+    console.error('');
+    console.error('Please make sure Claude Code CLI is installed:');
+    console.error('  npm install -g claude-code');
+    process.exit(1);
+  });
+}
+
+/**
+ * Start Claude Code with specified profile (auto-approve mode)
+ */
+function start(name, extraArgs = []) {
+  return startClaude(name, extraArgs, { safe: false });
+}
+
+/**
+ * Start Claude Code with specified profile (safe mode - requires permission confirmation)
+ */
+function safeStart(name, extraArgs = []) {
+  return startClaude(name, extraArgs, { safe: true });
 }
 
 /**
@@ -1257,7 +1478,7 @@ function completion(shell) {
     process.exit(1);
   }
 
-  const commands = 'list ls add update use remove rm current mode env edit';
+  const commands = COMMANDS.join(' ');
 
   switch (shell) {
     case 'bash':
@@ -1280,7 +1501,7 @@ _ccconfig_completions() {
       ;;
     2)
       case "\${prev}" in
-        use|update|remove|rm)
+        use|start|safe-start|update|remove|rm)
           COMPREPLY=( $(compgen -W "\${profiles}" -- \${cur}) )
           ;;
         mode)
@@ -1318,6 +1539,8 @@ _ccconfig() {
     'add:Add new configuration'
     'update:Update existing configuration'
     'use:Switch to specified configuration'
+    'start:Start Claude Code (auto-approve mode)'
+    'safe-start:Start Claude Code (safe mode, requires confirmation)'
     'remove:Remove configuration'
     'rm:Remove configuration'
     'current:Display current configuration'
@@ -1340,7 +1563,7 @@ _ccconfig() {
       ;;
     3)
       case $words[2] in
-        use|update|remove|rm)
+        use|start|safe-start|update|remove|rm)
           _describe 'profile' profiles
           ;;
         mode)
@@ -1377,6 +1600,8 @@ complete -c ccconfig -f -n "__fish_use_subcommand" -a "ls" -d "List all configur
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "add" -d "Add new configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "update" -d "Update existing configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "use" -d "Switch to specified configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "start" -d "Start Claude Code (auto-approve mode)"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "safe-start" -d "Start Claude Code (safe mode, requires confirmation)"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "remove" -d "Remove configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "rm" -d "Remove configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "current" -d "Display current configuration"
@@ -1391,8 +1616,8 @@ function __ccconfig_profiles
   end
 end
 
-# Profile name completion for use, update, remove
-complete -c ccconfig -f -n "__fish_seen_subcommand_from use update remove rm" -a "(__ccconfig_profiles)"
+# Profile name completion for use, start, safe-start, update, remove
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update remove rm" -a "(__ccconfig_profiles)"
 
 # Mode options
 complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
@@ -1434,7 +1659,7 @@ function Get-CconfigProfiles {
 Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('list', 'ls', 'add', 'update', 'use', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion')
+    $commands = @('list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion')
     $modes = @('settings', 'env')
     $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
 
@@ -1456,7 +1681,7 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     # Second argument completions based on command
     if ($position -eq 2 -or ($position -eq 3 -and $wordToComplete)) {
         switch ($command) {
-            { $_ -in 'use', 'update', 'remove', 'rm' } {
+            { $_ -in 'use', 'start', 'safe-start', 'update', 'remove', 'rm' } {
                 Get-CconfigProfiles | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }
@@ -1536,6 +1761,10 @@ function help() {
   console.log(
       '  use <name> [-p|--permanent]               Switch to specified configuration');
   console.log(
+      '  start <name> [claude-args...]             Start Claude Code (auto-approve mode)');
+  console.log(
+      '  safe-start <name> [claude-args...]        Start Claude Code (safe mode, requires confirmation)');
+  console.log(
       '  remove|rm <name>                          Remove configuration');
   console.log(
       '  current [-s|--show-secret]                Display current configuration');
@@ -1556,6 +1785,18 @@ function help() {
   console.log(
       '  -s, --show-secret                         Show full token in current command');
   console.log('');
+  console.log('Notes:');
+  console.log(
+      '  • Two ways to start Claude Code:');
+  console.log(
+      '    - start:      Auto-approve mode (adds --dangerously-skip-permissions)');
+  console.log(
+      '                  Fast and convenient, but use only with profiles you trust');
+  console.log(
+      '    - safe-start: Safe mode (requires manual confirmation for each command)');
+  console.log(
+      '                  Recommended for production or untrusted environments');
+  console.log('');
   console.log('Configuration file locations:');
   console.log(`  Configuration list: ${PROFILES_FILE}`);
   console.log(`  Claude settings: ${CLAUDE_SETTINGS}`);
@@ -1566,7 +1807,7 @@ function help() {
 async function main() {
   const args = process.argv.slice(2);
 
-  // Handle global flags first (standardized behavior)
+  // Handle global flags first (can appear anywhere)
   if (args.includes('--version') || args.includes('-V')) {
     showVersion();
     return;
@@ -1577,15 +1818,55 @@ async function main() {
     return;
   }
 
-  // Extract flags
-  const showSecret = args.includes('--show-secret') || args.includes('-s');
-  const permanent = args.includes('--permanent') || args.includes('-p');
-  const filteredArgs = args.filter(
-      arg => arg !== '--show-secret' && arg !== '-s' && arg !== '--permanent' &&
-          arg !== '-p' && arg !== '--version' && arg !== '-V' &&
-          arg !== '--help' && arg !== '-h');
+  // Find the command (first non-flag argument)
+  let commandIndex = -1;
+  for (let i = 0; i < args.length; i++) {
+    if (!args[i].startsWith('-')) {
+      commandIndex = i;
+      break;
+    }
+  }
 
-  const command = filteredArgs[0];
+  // If no command found, default to 'list'
+  const command = commandIndex >= 0 ? args[commandIndex] : null;
+
+  // Extract flags and arguments based on command type
+  let showSecret = false;
+  let permanent = false;
+  let filteredArgs = [];
+
+  // Commands that pass through arguments to Claude Code
+  const passThruCommands = ['start', 'safe-start'];
+
+  if (passThruCommands.includes(command)) {
+    // For pass-through commands:
+    // - Extract flags that appear BEFORE the command
+    // - Keep command and all arguments after it unchanged (for Claude)
+    const preCommandArgs = commandIndex >= 0 ? args.slice(0, commandIndex) : [];
+    showSecret = preCommandArgs.includes('--show-secret') || preCommandArgs.includes('-s');
+    permanent = preCommandArgs.includes('--permanent') || preCommandArgs.includes('-p');
+
+    // Keep command and all arguments after it (these go to Claude)
+    filteredArgs = commandIndex >= 0 ? args.slice(commandIndex) : [];
+  } else {
+    // For normal commands:
+    // - Extract flags from anywhere in the arguments
+    // - Remove all recognized flags from arguments
+    showSecret = args.includes('--show-secret') || args.includes('-s');
+    permanent = args.includes('--permanent') || args.includes('-p');
+
+    // Filter out all recognized flags
+    filteredArgs = args.filter(arg =>
+      arg !== '--show-secret' &&
+      arg !== '-s' &&
+      arg !== '--permanent' &&
+      arg !== '-p' &&
+      arg !== '--version' &&
+      arg !== '-V' &&
+      arg !== '--help' &&
+      arg !== '-h'
+    );
+  }
 
   switch (command) {
     case 'list':
@@ -1621,6 +1902,24 @@ async function main() {
       break;
     case 'edit':
       edit();
+      break;
+    case 'start':
+      if (!filteredArgs[1]) {
+        console.error('Error: Missing configuration name');
+        console.error('Usage: ccconfig start <name> [claude-args...]');
+        process.exit(1);
+      }
+      // Pass all arguments after the profile name to Claude
+      start(filteredArgs[1], filteredArgs.slice(2));
+      break;
+    case 'safe-start':
+      if (!filteredArgs[1]) {
+        console.error('Error: Missing configuration name');
+        console.error('Usage: ccconfig safe-start <name> [claude-args...]');
+        process.exit(1);
+      }
+      // Pass all arguments after the profile name to Claude
+      safeStart(filteredArgs[1], filteredArgs.slice(2));
       break;
     case 'completion':
       completion(filteredArgs[1]);

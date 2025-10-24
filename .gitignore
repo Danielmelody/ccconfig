@@ -1,4 +1,5 @@
 node_modules/
+promo
 *.log
 .DS_Store
 .claude
