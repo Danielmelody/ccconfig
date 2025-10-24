@@ -38,7 +38,7 @@ ccconfig use personal --permanent  # 或使用 -p 简写
 npm install -g ccconfig
 ```
 
-### 方式 1：直接启动模式（推荐 🚀）
+### 方式 1：直接启动模式（推荐）
 
 最简单的使用方式 - 直接使用指定配置启动 Claude Code：
 
@@ -64,21 +64,21 @@ ccconfig safe-start work         # 安全模式（每个命令需要确认）
 - **`ccconfig start`** - 自动批准模式
   - 自动添加 `--dangerously-skip-permissions` 标志
   - 命令无需确认直接执行
-  - ⚠️ **仅在您信任的配置中使用**
+  - **仅在您信任的配置中使用**
   - 适用场景：个人项目、可信的公司配置、快速开发
 
 - **`ccconfig safe-start`** - 安全模式
   - 不添加 `--dangerously-skip-permissions`
   - 执行每个命令前需要手动确认
-  - ✅ **推荐用于生产环境或不可信环境**
+  - **推荐用于生产环境或不可信环境**
   - 适用场景：生产系统、新配置、敏感数据
 
 **优势：**
-- ✅ 无需配置 shell
-- ✅ 无需手动切换
-- ✅ 自动注入环境变量
-- ✅ 支持所有 shell
-- ✅ 可传递额外参数：`ccconfig start work /path/to/project --verbose`
+- 无需配置 shell
+- 无需手动切换
+- 自动注入环境变量
+- 支持所有 shell
+- 可传递额外参数：`ccconfig start work /path/to/project --verbose`
 
 ### 方式 2：手动切换模式
 
@@ -269,11 +269,11 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 ccconfig 支持命令、配置名称和选项的 shell 自动补全，让您更容易发现和使用命令。
 
 **功能：**
-- ✅ 命令补全 (list, add, update, use, remove 等)
-- ✅ 配置名称补全（动态读取您的配置）
-- ✅ 选项补全 (--permanent, --show-secret 等)
-- ✅ 模式补全 (settings, env)
-- ✅ 格式补全 (bash, zsh, fish 等)
+- 命令补全 (list, add, update, use, remove 等)
+- 配置名称补全（动态读取您的配置）
+- 选项补全 (--permanent, --show-secret 等)
+- 模式补全 (settings, env)
+- 格式补全 (bash, zsh, fish 等)
 
 **安装：**
 

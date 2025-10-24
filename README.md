@@ -38,7 +38,7 @@ ccconfig use personal --permanent  # or use -p for short
 npm install -g ccconfig
 ```
 
-### Method 1: Direct Start Mode (Recommended 🚀)
+### Method 1: Direct Start Mode (Recommended)
 
 The easiest way to use ccconfig - directly start Claude Code with a specific profile:
 
@@ -64,21 +64,21 @@ ccconfig safe-start work         # Safe mode (requires confirmation for each com
 - **`ccconfig start`** - Auto-approve mode
   - Automatically adds `--dangerously-skip-permissions` flag
   - Commands execute without confirmation prompts
-  - ⚠️ **Only use with profiles you trust**
+  - **Only use with profiles you trust**
   - Perfect for: personal projects, trusted company profiles, rapid development
 
 - **`ccconfig safe-start`** - Safe mode
   - Does NOT add `--dangerously-skip-permissions`
   - Requires manual confirmation before executing each command
-  - ✅ **Recommended for production or untrusted environments**
+  - **Recommended for production or untrusted environments**
   - Perfect for: production systems, new profiles, sensitive data
 
 **Advantages:**
-- ✅ No shell configuration needed
-- ✅ No manual switching required
-- ✅ Environment variables automatically injected
-- ✅ Works across all shells
-- ✅ Pass additional arguments: `ccconfig start work /path/to/project --verbose`
+- No shell configuration needed
+- No manual switching required
+- Environment variables automatically injected
+- Works across all shells
+- Pass additional arguments: `ccconfig start work /path/to/project --verbose`
 
 ### Method 2: Manual Switch Mode
 
@@ -269,11 +269,11 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 ccconfig supports shell completion for commands, profile names, and options. This makes it easier to discover and use commands.
 
 **Features:**
-- ✅ Command completion (list, add, update, use, remove, etc.)
-- ✅ Profile name completion (dynamically reads from your configurations)
-- ✅ Option completion (--permanent, --show-secret, etc.)
-- ✅ Mode completion (settings, env)
-- ✅ Format completion (bash, zsh, fish, etc.)
+- Command completion (list, add, update, use, remove, etc.)
+- Profile name completion (dynamically reads from your configurations)
+- Option completion (--permanent, --show-secret, etc.)
+- Mode completion (settings, env)
+- Format completion (bash, zsh, fish, etc.)
 
 **Installation:**
 
