@@ -2,15 +2,28 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-Quickly switch between different claude-code providers
+Quickly switch between different claude-code providers and start Claude Code with specific profiles.
 
+**Recommended Usage (Easiest):**
 
 ```bash
-# Switch to work configuration during work hours
-ccconfig use company
+# Add configurations
+ccconfig add work
+ccconfig add personal
 
-# Switch back to personal configuration after work
-ccconfig use personal
+# Start Claude Code directly with a specific profile
+ccconfig start work              # During work hours
+ccconfig start personal          # After work
+
+# Or use safe mode (requires confirmation for each command)
+ccconfig safe-start work
+```
+
+**Alternative: Manual Switch Mode:**
+
+```bash
+# Switch configuration in current shell
+ccconfig use company
 
 # Permanently write to shell config (no need to eval or source each time)
 ccconfig use personal --permanent  # or use -p for short
@@ -25,31 +38,66 @@ ccconfig use personal --permanent  # or use -p for short
 npm install -g ccconfig
 ```
 
-### ENV Mode (Recommended, Default)
+### Method 1: Direct Start Mode (Recommended 🚀)
+
+The easiest way to use ccconfig - directly start Claude Code with a specific profile:
 
 ```bash
-# 1. Configure Shell auto-loading (see below)
-
-# 2. Add configuration (interactive mode)
-ccconfig add
+# 1. Add a configuration (interactive mode)
+ccconfig add work
 # Follow the prompts to enter:
-# - Name
 # - ANTHROPIC_BASE_URL
-# - ANTHROPIC_AUTH_TOKEN
-# - ANTHROPIC_API_KEY
+# - ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY
 # - ANTHROPIC_MODEL (optional)
 # - ANTHROPIC_SMALL_FAST_MODEL (optional)
 
-# 3. Switch configuration
+# 2. Start Claude Code directly with your profile
+ccconfig start work              # Auto-approve mode (adds --dangerously-skip-permissions)
+# or
+ccconfig safe-start work         # Safe mode (requires confirmation for each command)
+```
+
+**That's it!** Claude Code starts with your configuration automatically injected.
+
+**Two modes explained:**
+
+- **`ccconfig start`** - Auto-approve mode
+  - Automatically adds `--dangerously-skip-permissions` flag
+  - Commands execute without confirmation prompts
+  - ⚠️ **Only use with profiles you trust**
+  - Perfect for: personal projects, trusted company profiles, rapid development
+
+- **`ccconfig safe-start`** - Safe mode
+  - Does NOT add `--dangerously-skip-permissions`
+  - Requires manual confirmation before executing each command
+  - ✅ **Recommended for production or untrusted environments**
+  - Perfect for: production systems, new profiles, sensitive data
+
+**Advantages:**
+- ✅ No shell configuration needed
+- ✅ No manual switching required
+- ✅ Environment variables automatically injected
+- ✅ Works across all shells
+- ✅ Pass additional arguments: `ccconfig start work /path/to/project --verbose`
+
+### Method 2: Manual Switch Mode
+
+If you prefer to manually switch configurations and start Claude Code separately:
+
+```bash
+# 1. Add configuration (interactive mode)
+ccconfig add work
+
+# 2. Switch configuration
 ccconfig use work
 
-# 4. Apply immediately (choose one method):
-# Method A: Temporary (only in current shell)
-eval $(ccconfig env bash)  # or use the detected command from output
+# 3. Apply to current shell (choose one):
+eval $(ccconfig env bash)        # Bash/Zsh - temporary
+ccconfig env fish | source       # Fish - temporary
+ccconfig use work --permanent    # Write to shell config - permanent
 
-# Method B: Permanent (write to shell config file)
-ccconfig use work --permanent  # or -p for short
-# Automatically detects and modifies ~/.bashrc, ~/.zshrc, or config.fish
+# 4. Start Claude Code manually
+claude
 ```
 
 ### Settings Mode
@@ -212,7 +260,9 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 ✓ Configuration 'work' updated
 ```
 
-**Note:** After updating a configuration, remember to activate it with `ccconfig use work` if you want the changes to take effect immediately.
+**Note:** After updating a configuration, you can either:
+- Use `ccconfig start work` to launch Claude Code with the updated profile
+- Or use `ccconfig use work` to activate it in current shell
 
 ### Shell Completion
 

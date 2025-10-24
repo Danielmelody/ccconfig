@@ -2,14 +2,28 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-快速切换不同的 claude-code 提供商配置
+快速切换不同的 claude-code 提供商配置，并使用指定配置启动 Claude Code。
+
+**推荐用法（最简单）：**
 
 ```bash
-# 工作时间切换到公司配置
-ccconfig use company
+# 添加配置
+ccconfig add work
+ccconfig add personal
 
-# 下班后切换回个人配置
-ccconfig use personal
+# 直接使用指定配置启动 Claude Code
+ccconfig start work              # 工作时间
+ccconfig start personal          # 下班后
+
+# 或使用安全模式（每个命令都需要确认）
+ccconfig safe-start work
+```
+
+**备选方案：手动切换模式：**
+
+```bash
+# 在当前 shell 中切换配置
+ccconfig use company
 
 # 永久写入 shell 配置文件（无需每次 eval 或 source）
 ccconfig use personal --permanent  # 或使用 -p 简写
@@ -24,31 +38,66 @@ ccconfig use personal --permanent  # 或使用 -p 简写
 npm install -g ccconfig
 ```
 
-### ENV 模式（推荐，默认）
+### 方式 1：直接启动模式（推荐 🚀）
+
+最简单的使用方式 - 直接使用指定配置启动 Claude Code：
 
 ```bash
-# 1. 配置 Shell 自动加载（见下文）
-
-# 2. 添加配置（交互模式）
-ccconfig add
+# 1. 添加配置（交互模式）
+ccconfig add work
 # 按提示输入：
-# - 名称
 # - ANTHROPIC_BASE_URL
-# - ANTHROPIC_AUTH_TOKEN
-# - ANTHROPIC_API_KEY
+# - ANTHROPIC_AUTH_TOKEN 或 ANTHROPIC_API_KEY
 # - ANTHROPIC_MODEL（可选）
 # - ANTHROPIC_SMALL_FAST_MODEL（可选）
 
-# 3. 切换配置
+# 2. 直接使用配置启动 Claude Code
+ccconfig start work              # 自动批准模式（添加 --dangerously-skip-permissions）
+# 或
+ccconfig safe-start work         # 安全模式（每个命令需要确认）
+```
+
+**就这么简单！** Claude Code 会自动注入您的配置启动。
+
+**两种模式说明：**
+
+- **`ccconfig start`** - 自动批准模式
+  - 自动添加 `--dangerously-skip-permissions` 标志
+  - 命令无需确认直接执行
+  - ⚠️ **仅在您信任的配置中使用**
+  - 适用场景：个人项目、可信的公司配置、快速开发
+
+- **`ccconfig safe-start`** - 安全模式
+  - 不添加 `--dangerously-skip-permissions`
+  - 执行每个命令前需要手动确认
+  - ✅ **推荐用于生产环境或不可信环境**
+  - 适用场景：生产系统、新配置、敏感数据
+
+**优势：**
+- ✅ 无需配置 shell
+- ✅ 无需手动切换
+- ✅ 自动注入环境变量
+- ✅ 支持所有 shell
+- ✅ 可传递额外参数：`ccconfig start work /path/to/project --verbose`
+
+### 方式 2：手动切换模式
+
+如果您更喜欢手动切换配置，然后单独启动 Claude Code：
+
+```bash
+# 1. 添加配置（交互模式）
+ccconfig add work
+
+# 2. 切换配置
 ccconfig use work
 
-# 4. 立即生效（选择一种方法）：
-# 方法 A: 临时生效（仅当前 shell）
-eval $(ccconfig env bash)  # 或使用输出中检测到的命令
+# 3. 应用到当前 shell（选择一种）：
+eval $(ccconfig env bash)        # Bash/Zsh - 临时生效
+ccconfig env fish | source       # Fish - 临时生效
+ccconfig use work --permanent    # 写入 shell 配置 - 永久生效
 
-# 方法 B: 永久生效（写入 shell 配置文件）
-ccconfig use work --permanent  # 或使用 -p 简写
-# 自动检测并修改 ~/.bashrc、~/.zshrc 或 config.fish
+# 4. 手动启动 Claude Code
+claude
 ```
 
 ### Settings 模式
@@ -211,7 +260,9 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 ✓ Configuration 'work' updated
 ```
 
-**注意：** 更新配置后，如果要立即生效，记得使用 `ccconfig use work` 激活配置。
+**注意：** 更新配置后，您可以：
+- 使用 `ccconfig start work` 以更新后的配置启动 Claude Code
+- 或使用 `ccconfig use work` 在当前 shell 中激活配置
 
 ### Shell 自动补全
 
