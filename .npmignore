@@ -25,3 +25,5 @@ tests/
 # Local config (don't publish user's local configs)
 .claude/
 
+promo
+
