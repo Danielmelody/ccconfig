@@ -1420,7 +1420,10 @@ function startClaude(name, extraArgs = [], options = {}) {
   // Normalize all profile env values to strings (spawn requires string values)
   const normalizedEnv = {};
   for (const [key, value] of Object.entries(profile.env)) {
-    normalizedEnv[key] = String(value ?? '');
+    if (value === undefined || value === null) {
+      continue;
+    }
+    normalizedEnv[key] = typeof value === 'string' ? value : String(value);
   }
   const envVars = {...process.env, ...normalizedEnv};
 
@@ -1430,21 +1433,91 @@ function startClaude(name, extraArgs = [], options = {}) {
     stdio: 'inherit'  // Inherit stdin, stdout, stderr from parent process
   });
 
+  // Function to restore terminal state and exit
+  const exitGracefully = (code) => {
+    // Reset terminal to normal mode (in case it was left in raw mode)
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      try {
+        process.stdin.setRawMode(false);
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+    }
+
+    const canResetTerminal = process.platform !== 'win32' && process.stdin.isTTY && process.stdout.isTTY;
+
+    // Use stty to restore terminal settings on Unix-like systems
+    // This is more comprehensive than just setRawMode
+    if (canResetTerminal) {
+      try {
+        // 'stty sane' restores terminal to sensible settings
+        // Use stdio: 'inherit' to ensure it operates on the same terminal
+        execSync('stty sane', { stdio: 'inherit' });
+      } catch (e) {
+        // If stty fails, try basic echo and icanon reset
+        try {
+          execSync('stty echo icanon', { stdio: 'inherit' });
+        } catch (e2) {
+          try {
+            execSync('stty echo', { stdio: 'inherit' });
+            execSync('stty icanon', { stdio: 'inherit' });
+          } catch (e3) {
+            // Ignore - best effort
+          }
+        }
+      }
+    }
+
+    process.exit(code || 0);
+  };
+
+  // Handle SIGINT (Ctrl+C) and SIGTERM
+  const signalHandler = (signal) => {
+    // Forward signal to child process
+    if (claude && !claude.killed) {
+      claude.kill(signal);
+    }
+    // Don't exit immediately - wait for child to exit
+  };
+
+  process.on('SIGINT', signalHandler);
+  process.on('SIGTERM', signalHandler);
+
   // Handle process exit
   claude.on('close', (code) => {
+    // Remove signal handlers to avoid duplicate handling
+    process.removeListener('SIGINT', signalHandler);
+    process.removeListener('SIGTERM', signalHandler);
+
+    // Show project promotion message on exit
+    console.log('');
+    console.log('──────────────────────────────────────────');
+    console.log('Thanks for using ccconfig!');
+    console.log('');
+    console.log('If you find this tool helpful, please consider:');
+    console.log('  ⭐ Star us on GitHub: https://github.com/Danielmelody/ccconfig');
+    console.log('  📢 Share with others who use Claude Code');
+    console.log('──────────────────────────────────────────');
+    console.log('');
+
     if (code !== 0 && code !== null) {
       console.error(`Claude Code exited with code ${code}`);
-      process.exit(code);
+      exitGracefully(code);
+    } else {
+      exitGracefully(0);
     }
-    process.exit(0);
   });
 
   claude.on('error', (err) => {
+    // Remove signal handlers
+    process.removeListener('SIGINT', signalHandler);
+    process.removeListener('SIGTERM', signalHandler);
+
     console.error(`Error starting Claude Code: ${err.message}`);
     console.error('');
     console.error('Please make sure Claude Code CLI is installed:');
     console.error('  npm install -g claude-code');
-    process.exit(1);
+    exitGracefully(1);
   });
 }
 
