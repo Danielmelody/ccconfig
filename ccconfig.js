@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
-const { spawn, execSync } = require('child_process');
+const {spawn, execSync} = require('child_process');
 
 // Configuration file paths
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'ccconfig');
@@ -52,7 +52,11 @@ function ensureProfilesAvailable({onEmpty} = {}) {
 }
 
 function ensureProfileAvailable(
-    name, {allowEmptyEnv = false, onEmptyProfiles, onMissingProfile, onEmptyEnv} = {}) {
+    name,
+    {allowEmptyEnv = false,
+     onEmptyProfiles,
+     onMissingProfile,
+     onEmptyEnv} = {}) {
   const profiles = ensureProfilesAvailable({onEmpty: onEmptyProfiles});
   const profilesMap = getProfilesMap(profiles);
   const profile = profilesMap[name];
@@ -68,7 +72,8 @@ function ensureProfileAvailable(
     process.exit(1);
   }
 
-  if (!allowEmptyEnv && (!profile.env || Object.keys(profile.env).length === 0)) {
+  if (!allowEmptyEnv &&
+      (!profile.env || Object.keys(profile.env).length === 0)) {
     if (typeof onEmptyEnv === 'function') {
       onEmptyEnv();
     } else {
@@ -83,7 +88,10 @@ function ensureProfileAvailable(
 }
 
 // All supported commands
-const COMMANDS = ['list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion'];
+const COMMANDS = [
+  'list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm',
+  'current', 'mode', 'env', 'edit', 'completion'
+];
 
 // ccconfig markers for shell config files
 const SHELL_MARKERS = {
@@ -140,11 +148,16 @@ function printEnvVar(key, value, mask = true) {
  * Utility: Display environment variables with consistent formatting
  */
 function displayEnvVars(envVars, mask = true, indent = '  ') {
-  const keys = [ENV_KEYS.BASE_URL, ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY, ENV_KEYS.MODEL, ENV_KEYS.SMALL_FAST_MODEL];
+  const keys = [
+    ENV_KEYS.BASE_URL, ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY, ENV_KEYS.MODEL,
+    ENV_KEYS.SMALL_FAST_MODEL
+  ];
   for (const key of keys) {
     if (!(key in envVars)) continue;
     const value = envVars[key];
-    if (!value && key !== ENV_KEYS.BASE_URL && key !== ENV_KEYS.AUTH_TOKEN && key !== ENV_KEYS.API_KEY) continue;
+    if (!value && key !== ENV_KEYS.BASE_URL && key !== ENV_KEYS.AUTH_TOKEN &&
+        key !== ENV_KEYS.API_KEY)
+      continue;
     const displayValue = maskValue(key, value, mask);
     console.log(`${indent}${key}: ${displayValue || '(not set)'}`);
   }
@@ -160,16 +173,14 @@ class ReadlineHelper {
 
   ensureInterface() {
     if (!this.rl) {
-      this.rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-      });
+      this.rl = readline.createInterface(
+          {input: process.stdin, output: process.stdout});
     }
   }
 
   async ask(question, defaultValue = '', options = {}) {
     this.ensureInterface();
-    const { brackets = 'parentheses' } = options;
+    const {brackets = 'parentheses'} = options;
     const left = brackets === 'square' ? '[' : '(';
     const right = brackets === 'square' ? ']' : ')';
     const suffix = defaultValue ? ` ${left}${defaultValue}${right}` : '';
@@ -184,34 +195,32 @@ class ReadlineHelper {
 
   async askEnvVars(existingEnv = {}) {
     const baseUrl = await this.ask(
-      'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
-      existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-      { brackets: existingEnv.ANTHROPIC_BASE_URL ? 'square' : 'parentheses' }
-    );
+        'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
+        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
+        {brackets: existingEnv.ANTHROPIC_BASE_URL ? 'square' : 'parentheses'});
 
     const authToken = await this.ask(
-      'ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)',
-      existingEnv.ANTHROPIC_AUTH_TOKEN || '',
-      { brackets: existingEnv.ANTHROPIC_AUTH_TOKEN ? 'square' : 'parentheses' }
-    );
+        'ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)',
+        existingEnv.ANTHROPIC_AUTH_TOKEN || '', {
+          brackets: existingEnv.ANTHROPIC_AUTH_TOKEN ? 'square' : 'parentheses'
+        });
 
     const apiKey = await this.ask(
-      'ANTHROPIC_API_KEY (press Enter to keep current/set empty)',
-      existingEnv.ANTHROPIC_API_KEY || '',
-      { brackets: existingEnv.ANTHROPIC_API_KEY ? 'square' : 'parentheses' }
-    );
+        'ANTHROPIC_API_KEY (press Enter to keep current/set empty)',
+        existingEnv.ANTHROPIC_API_KEY || '',
+        {brackets: existingEnv.ANTHROPIC_API_KEY ? 'square' : 'parentheses'});
 
     const model = await this.ask(
-      'ANTHROPIC_MODEL (press Enter to skip/keep current)',
-      existingEnv.ANTHROPIC_MODEL || '',
-      { brackets: existingEnv.ANTHROPIC_MODEL ? 'square' : 'parentheses' }
-    );
+        'ANTHROPIC_MODEL (press Enter to skip/keep current)',
+        existingEnv.ANTHROPIC_MODEL || '',
+        {brackets: existingEnv.ANTHROPIC_MODEL ? 'square' : 'parentheses'});
 
     const smallFastModel = await this.ask(
-      'ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)',
-      existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '',
-      { brackets: existingEnv.ANTHROPIC_SMALL_FAST_MODEL ? 'square' : 'parentheses' }
-    );
+        'ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)',
+        existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '', {
+          brackets: existingEnv.ANTHROPIC_SMALL_FAST_MODEL ? 'square' :
+                                                             'parentheses'
+        });
 
     const envVars = {
       [ENV_KEYS.BASE_URL]: baseUrl || '',
@@ -249,14 +258,17 @@ function requireInteractive(commandName) {
  * Utility: Display environment variables section for current command
  */
 function displayEnvSection(envVars, showSecret) {
-  if (!envVars || (!envVars[ENV_KEYS.BASE_URL] && !envVars[ENV_KEYS.AUTH_TOKEN] && !envVars[ENV_KEYS.API_KEY])) {
+  if (!envVars ||
+      (!envVars[ENV_KEYS.BASE_URL] && !envVars[ENV_KEYS.AUTH_TOKEN] &&
+       !envVars[ENV_KEYS.API_KEY])) {
     console.log('  (not configured)');
     return;
   }
 
   const normalizedEnv = {
     [ENV_KEYS.BASE_URL]: envVars[ENV_KEYS.BASE_URL] || '(not set)',
-    [ENV_KEYS.AUTH_TOKEN]: envVars[ENV_KEYS.AUTH_TOKEN] || envVars[ENV_KEYS.API_KEY] || '(not set)',
+    [ENV_KEYS.AUTH_TOKEN]: envVars[ENV_KEYS.AUTH_TOKEN] ||
+        envVars[ENV_KEYS.API_KEY] || '(not set)',
     [ENV_KEYS.MODEL]: envVars[ENV_KEYS.MODEL],
     [ENV_KEYS.SMALL_FAST_MODEL]: envVars[ENV_KEYS.SMALL_FAST_MODEL]
   };
@@ -269,12 +281,14 @@ function displayEnvSection(envVars, showSecret) {
 
   // Display with aligned columns
   console.log(`  ${ENV_KEYS.BASE_URL}:   ${normalizedEnv[ENV_KEYS.BASE_URL]}`);
-  console.log(`  ${ENV_KEYS.AUTH_TOKEN}: ${normalizedEnv[ENV_KEYS.AUTH_TOKEN]}`);
+  console.log(
+      `  ${ENV_KEYS.AUTH_TOKEN}: ${normalizedEnv[ENV_KEYS.AUTH_TOKEN]}`);
   if (normalizedEnv[ENV_KEYS.MODEL]) {
     console.log(`  ${ENV_KEYS.MODEL}:      ${normalizedEnv[ENV_KEYS.MODEL]}`);
   }
   if (normalizedEnv[ENV_KEYS.SMALL_FAST_MODEL]) {
-    console.log(`  ${ENV_KEYS.SMALL_FAST_MODEL}: ${normalizedEnv[ENV_KEYS.SMALL_FAST_MODEL]}`);
+    console.log(`  ${ENV_KEYS.SMALL_FAST_MODEL}: ${
+        normalizedEnv[ENV_KEYS.SMALL_FAST_MODEL]}`);
   }
 }
 
@@ -315,7 +329,8 @@ function validateConfigName(name, allowEmpty = false) {
   // Limit length to prevent issues
   const MAX_NAME_LENGTH = 50;
   if (name.length > MAX_NAME_LENGTH) {
-    console.error(`Error: Configuration name too long (max ${MAX_NAME_LENGTH} characters)`);
+    console.error(`Error: Configuration name too long (max ${
+        MAX_NAME_LENGTH} characters)`);
     console.error(`Current length: ${name.length}`);
     process.exit(1);
   }
@@ -451,10 +466,10 @@ function writeEnvFile(envVars) {
     const lines = Object.entries(envVars).map(([key, value]) => {
       // Escape special characters to prevent injection
       const escapedValue = String(value ?? '')
-        .replace(/\\/g, '\\\\')
-        .replace(/\n/g, '\\n')
-        .replace(/\r/g, '\\r')
-        .replace(/\t/g, '\\t');
+                               .replace(/\\/g, '\\\\')
+                               .replace(/\n/g, '\\n')
+                               .replace(/\r/g, '\\r')
+                               .replace(/\t/g, '\\t');
       return `${key}=${escapedValue}`;
     });
     const content = lines.join('\n') + '\n';
@@ -481,17 +496,17 @@ function readEnvFile() {
     const content = fs.readFileSync(ENV_FILE, 'utf-8');
     const env = {};
     content.split('\n').forEach(line => {
-      // Only accept valid environment variable names: starts with letter or underscore,
-      // followed by letters, numbers, or underscores
+      // Only accept valid environment variable names: starts with letter or
+      // underscore, followed by letters, numbers, or underscores
       const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
       if (match) {
         // Unescape special characters
         // IMPORTANT: Must unescape \\\\ first to avoid double-unescaping
         const unescapedValue = match[2]
-          .replace(/\\\\/g, '\\')
-          .replace(/\\n/g, '\n')
-          .replace(/\\r/g, '\r')
-          .replace(/\\t/g, '\t');
+                                   .replace(/\\\\/g, '\\')
+                                   .replace(/\\n/g, '\n')
+                                   .replace(/\\r/g, '\r')
+                                   .replace(/\\t/g, '\t');
         env[match[1]] = unescapedValue;
       }
     });
@@ -631,7 +646,8 @@ function list() {
       console.log(`    Model: ${profile.env.ANTHROPIC_MODEL}`);
     }
     if (profile.env && profile.env.ANTHROPIC_SMALL_FAST_MODEL) {
-      console.log(`    Small Fast Model: ${profile.env.ANTHROPIC_SMALL_FAST_MODEL}`);
+      console.log(
+          `    Small Fast Model: ${profile.env.ANTHROPIC_SMALL_FAST_MODEL}`);
     }
     console.log('');
   }
@@ -696,7 +712,8 @@ async function add(name) {
     console.log('');
     console.log('This information has been saved to:');
     console.log(`  ${PROFILES_FILE}`);
-    console.log('You can edit this file directly to further customize the profile:');
+    console.log(
+        'You can edit this file directly to further customize the profile:');
     console.log(`  vim ${PROFILES_FILE}`);
     console.log('Or run ccconfig edit to open it with your preferred editor');
   } finally {
@@ -730,7 +747,8 @@ async function update(name) {
         console.error(`Error: Configuration '${name}' does not exist`);
         console.error('');
         console.error('Run ccconfig list to see available configurations');
-        console.error(`Or use 'ccconfig add ${name}' to create a new configuration`);
+        console.error(
+            `Or use 'ccconfig add ${name}' to create a new configuration`);
         process.exit(1);
       }
     });
@@ -738,7 +756,8 @@ async function update(name) {
     const existingEnv = profile.env || {};
 
     console.log(`Updating configuration '${name}'`);
-    console.log('Press Enter to keep current value/default, or enter new value to update');
+    console.log(
+        'Press Enter to keep current value/default, or enter new value to update');
     console.log('');
 
     const envVars = await helper.askEnvVars(existingEnv);
@@ -812,7 +831,9 @@ const ShellUtils = {
     },
     fish: (value) => {
       const str = value == null ? '' : String(value);
-      return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$');
+      return str.replace(/\\/g, '\\\\')
+          .replace(/"/g, '\\"')
+          .replace(/\$/g, '\\$');
     },
     pwsh: (value) => {
       const str = value == null ? '' : String(value);
@@ -827,10 +848,12 @@ const ShellUtils = {
     if (process.env.FISH_VERSION || shellPath.includes('fish')) {
       return 'fish';
     }
-    if (process.env.ZSH_NAME || process.env.ZSH_VERSION || shellPath.includes('zsh')) {
+    if (process.env.ZSH_NAME || process.env.ZSH_VERSION ||
+        shellPath.includes('zsh')) {
       return 'zsh';
     }
-    if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL || shellPath.includes('pwsh') || shellPath.includes('powershell')) {
+    if (process.env.POWERSHELL_DISTRIBUTION_CHANNEL ||
+        shellPath.includes('pwsh') || shellPath.includes('powershell')) {
       return 'powershell';
     }
     if (shellPath.includes('bash')) {
@@ -851,14 +874,17 @@ const ShellUtils = {
     const configs = {
       fish: path.join(homeDir, '.config', 'fish', 'config.fish'),
       zsh: path.join(homeDir, '.zshrc'),
-      bash: process.platform === 'darwin'
-        ? (fs.existsSync(path.join(homeDir, '.bash_profile')) || !fs.existsSync(path.join(homeDir, '.bashrc'))
-          ? path.join(homeDir, '.bash_profile')
-          : path.join(homeDir, '.bashrc'))
-        : path.join(homeDir, '.bashrc'),
-      powershell: process.platform === 'win32'
-        ? path.join(process.env.USERPROFILE || homeDir, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1')
-        : path.join(homeDir, '.config', 'powershell', 'profile.ps1')
+      bash: process.platform === 'darwin' ?
+          (fs.existsSync(path.join(homeDir, '.bash_profile')) ||
+                   !fs.existsSync(path.join(homeDir, '.bashrc')) ?
+               path.join(homeDir, '.bash_profile') :
+               path.join(homeDir, '.bashrc')) :
+          path.join(homeDir, '.bashrc'),
+      powershell: process.platform === 'win32' ?
+          path.join(
+              process.env.USERPROFILE || homeDir, 'Documents', 'PowerShell',
+              'Microsoft.PowerShell_profile.ps1') :
+          path.join(homeDir, '.config', 'powershell', 'profile.ps1')
     };
     return configs[shellType];
   },
@@ -893,11 +919,10 @@ const ShellUtils = {
           break;
         case 'dotenv':
           const renderedValue = value == null ? '' : String(value);
-          const escapedValue = renderedValue
-            .replace(/\\/g, '\\\\')
-            .replace(/\n/g, '\\n')
-            .replace(/\r/g, '\\r')
-            .replace(/\t/g, '\\t');
+          const escapedValue = renderedValue.replace(/\\/g, '\\\\')
+                                   .replace(/\n/g, '\\n')
+                                   .replace(/\r/g, '\\r')
+                                   .replace(/\t/g, '\\t');
           lines.push(`${key}=${escapedValue}`);
           break;
       }
@@ -907,9 +932,15 @@ const ShellUtils = {
 };
 
 // Legacy function wrappers for backward compatibility
-function escapePosix(value) { return ShellUtils.escape.posix(value); }
-function escapeFish(value) { return ShellUtils.escape.fish(value); }
-function escapePwsh(value) { return ShellUtils.escape.pwsh(value); }
+function escapePosix(value) {
+  return ShellUtils.escape.posix(value);
+}
+function escapeFish(value) {
+  return ShellUtils.escape.fish(value);
+}
+function escapePwsh(value) {
+  return ShellUtils.escape.pwsh(value);
+}
 
 /**
  * Detect shell type and config file path
@@ -950,7 +981,8 @@ async function writePermanentEnv(envVars) {
   const maskedEnvLines = ShellUtils.formatEnvVars(maskedEnvVars, shell);
 
   const envBlock = `${marker}\n${envLines.join('\n')}\n${markerEnd}\n`;
-  const maskedEnvBlock = `${marker}\n${maskedEnvLines.join('\n')}\n${markerEnd}\n`;
+  const maskedEnvBlock =
+      `${marker}\n${maskedEnvLines.join('\n')}\n${markerEnd}\n`;
 
   // Display warning and confirmation
   console.log('');
@@ -1319,12 +1351,15 @@ function env(format = 'bash') {
   const envVars = getActiveEnvVars();
 
   if (!envVars || Object.keys(envVars).length === 0) {
-    console.error('Error: No available environment variable configuration found');
-    console.error('Please run ccconfig use <name> to select a configuration first');
+    console.error(
+        'Error: No available environment variable configuration found');
+    console.error(
+        'Please run ccconfig use <name> to select a configuration first');
     process.exit(1);
   }
 
-  const supportedFormats = ['fish', 'bash', 'zsh', 'sh', 'powershell', 'pwsh', 'dotenv'];
+  const supportedFormats =
+      ['fish', 'bash', 'zsh', 'sh', 'powershell', 'pwsh', 'dotenv'];
   if (!supportedFormats.includes(format)) {
     console.error(`Error: Unsupported format: ${format}`);
     console.error(`Supported formats: ${supportedFormats.join(', ')}`);
@@ -1343,7 +1378,7 @@ function env(format = 'bash') {
  * @param {boolean} options.safe - Whether to run in safe mode (default: false)
  */
 function startClaude(name, extraArgs = [], options = {}) {
-  const { safe = false } = options;
+  const {safe = false} = options;
   const commandName = safe ? 'safe-start' : 'start';
 
   if (!name) {
@@ -1373,8 +1408,9 @@ function startClaude(name, extraArgs = [], options = {}) {
 
   // Check if claude binary exists before proceeding
   try {
-    const command = process.platform === 'win32' ? 'where claude' : 'which claude';
-    execSync(command, { stdio: 'pipe' });
+    const command =
+        process.platform === 'win32' ? 'where claude' : 'which claude';
+    execSync(command, {stdio: 'pipe'});
   } catch (err) {
     console.error('Error: Claude Code CLI not found');
     console.error('');
@@ -1395,17 +1431,22 @@ function startClaude(name, extraArgs = [], options = {}) {
   }
 
   // Build Claude arguments based on mode
-  const claudeArgs = safe ? extraArgs : ['--dangerously-skip-permissions', ...extraArgs];
+  const claudeArgs =
+      safe ? extraArgs : ['--dangerously-skip-permissions', ...extraArgs];
 
   // Display mode-specific notes
   console.log('');
   if (safe) {
-    console.log('Note: Running in safe mode (permission confirmation required)');
-    console.log('      Claude Code will ask for confirmation before executing commands');
+    console.log(
+        'Note: Running in safe mode (permission confirmation required)');
+    console.log(
+        '      Claude Code will ask for confirmation before executing commands');
     console.log('      For automatic execution, use "ccconfig start" instead');
   } else {
-    console.log('Note: Starting with --dangerously-skip-permissions flag enabled');
-    console.log('      This allows Claude Code to execute commands without confirmation prompts');
+    console.log(
+        'Note: Starting with --dangerously-skip-permissions flag enabled');
+    console.log(
+        '      This allows Claude Code to execute commands without confirmation prompts');
     console.log('      Only use this with profiles you trust');
   }
   console.log('');
@@ -1444,7 +1485,8 @@ function startClaude(name, extraArgs = [], options = {}) {
       }
     }
 
-    const canResetTerminal = process.platform !== 'win32' && process.stdin.isTTY && process.stdout.isTTY;
+    const canResetTerminal = process.platform !== 'win32' &&
+        process.stdin.isTTY && process.stdout.isTTY;
 
     // Use stty to restore terminal settings on Unix-like systems
     // This is more comprehensive than just setRawMode
@@ -1452,15 +1494,15 @@ function startClaude(name, extraArgs = [], options = {}) {
       try {
         // 'stty sane' restores terminal to sensible settings
         // Use stdio: 'inherit' to ensure it operates on the same terminal
-        execSync('stty sane', { stdio: 'inherit' });
+        execSync('stty sane', {stdio: 'inherit'});
       } catch (e) {
         // If stty fails, try basic echo and icanon reset
         try {
-          execSync('stty echo icanon', { stdio: 'inherit' });
+          execSync('stty echo icanon', {stdio: 'inherit'});
         } catch (e2) {
           try {
-            execSync('stty echo', { stdio: 'inherit' });
-            execSync('stty icanon', { stdio: 'inherit' });
+            execSync('stty echo', {stdio: 'inherit'});
+            execSync('stty icanon', {stdio: 'inherit'});
           } catch (e3) {
             // Ignore - best effort
           }
@@ -1492,7 +1534,7 @@ function startClaude(name, extraArgs = [], options = {}) {
     // Show project promotion message on exit
     console.log('');
     console.log('──────────────────────────────────────────');
-    console.log('Thanks for using ccconfig!');
+    console.log('Thanks for using \x1b[1mccconfig\x1b[0m!');
     console.log('');
     console.log('If you find this tool helpful, please consider:');
     console.log('  ⭐ Star us on GitHub: https://github.com/Danielmelody/ccconfig');
@@ -1525,14 +1567,15 @@ function startClaude(name, extraArgs = [], options = {}) {
  * Start Claude Code with specified profile (auto-approve mode)
  */
 function start(name, extraArgs = []) {
-  return startClaude(name, extraArgs, { safe: false });
+  return startClaude(name, extraArgs, {safe: false});
 }
 
 /**
- * Start Claude Code with specified profile (safe mode - requires permission confirmation)
+ * Start Claude Code with specified profile (safe mode - requires permission
+ * confirmation)
  */
 function safeStart(name, extraArgs = []) {
-  return startClaude(name, extraArgs, { safe: true });
+  return startClaude(name, extraArgs, {safe: true});
 }
 
 /**
@@ -1546,7 +1589,8 @@ function completion(shell) {
     console.error('To install:');
     console.error('  Bash:       ccconfig completion bash >> ~/.bashrc');
     console.error('  Zsh:        ccconfig completion zsh >> ~/.zshrc');
-    console.error('  Fish:       ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish');
+    console.error(
+        '  Fish:       ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish');
     console.error('  PowerShell: ccconfig completion pwsh >> $PROFILE');
     process.exit(1);
   }
@@ -1859,8 +1903,7 @@ function help() {
       '  -s, --show-secret                         Show full token in current command');
   console.log('');
   console.log('Notes:');
-  console.log(
-      '  • Two ways to start Claude Code:');
+  console.log('  • Two ways to start Claude Code:');
   console.log(
       '    - start:      Auto-approve mode (adds --dangerously-skip-permissions)');
   console.log(
@@ -1916,8 +1959,10 @@ async function main() {
     // - Extract flags that appear BEFORE the command
     // - Keep command and all arguments after it unchanged (for Claude)
     const preCommandArgs = commandIndex >= 0 ? args.slice(0, commandIndex) : [];
-    showSecret = preCommandArgs.includes('--show-secret') || preCommandArgs.includes('-s');
-    permanent = preCommandArgs.includes('--permanent') || preCommandArgs.includes('-p');
+    showSecret = preCommandArgs.includes('--show-secret') ||
+        preCommandArgs.includes('-s');
+    permanent =
+        preCommandArgs.includes('--permanent') || preCommandArgs.includes('-p');
 
     // Keep command and all arguments after it (these go to Claude)
     filteredArgs = commandIndex >= 0 ? args.slice(commandIndex) : [];
@@ -1929,16 +1974,10 @@ async function main() {
     permanent = args.includes('--permanent') || args.includes('-p');
 
     // Filter out all recognized flags
-    filteredArgs = args.filter(arg =>
-      arg !== '--show-secret' &&
-      arg !== '-s' &&
-      arg !== '--permanent' &&
-      arg !== '-p' &&
-      arg !== '--version' &&
-      arg !== '-V' &&
-      arg !== '--help' &&
-      arg !== '-h'
-    );
+    filteredArgs = args.filter(
+        arg => arg !== '--show-secret' && arg !== '-s' &&
+            arg !== '--permanent' && arg !== '-p' && arg !== '--version' &&
+            arg !== '-V' && arg !== '--help' && arg !== '-h');
   }
 
   switch (command) {
