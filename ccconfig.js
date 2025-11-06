@@ -90,7 +90,7 @@ function ensureProfileAvailable(
 // All supported commands
 const COMMANDS = [
   'list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm',
-  'current', 'mode', 'env', 'edit', 'completion'
+  'current', 'mode', 'env', 'completion'
 ];
 
 // ccconfig markers for shell config files
@@ -688,9 +688,8 @@ async function add(name) {
     if (profilesMap[name]) {
       console.error(`Error: Configuration '${name}' already exists`);
       console.error('');
-      console.error('To modify this configuration, use one of:');
-      console.error(`  ccconfig update ${name}    # Interactive update`);
-      console.error(`  ccconfig edit              # Manual edit`);
+      console.error('To modify this configuration, use:');
+      console.error(`  ccconfig update ${name}`);
       process.exit(1);
     }
 
@@ -704,18 +703,60 @@ async function add(name) {
 
     console.log(`✓ Configuration '${name}' added`);
     console.log('');
-    console.log('Run the following command to activate:');
-    console.log(`  ccconfig use ${name}`);
+
+    // Check if claude binary exists before offering to start
+    let claudeAvailable = false;
+    try {
+      const command =
+          process.platform === 'win32' ? 'where claude' : 'which claude';
+      execSync(command, {stdio: 'pipe'});
+      claudeAvailable = true;
+    } catch (err) {
+      // Claude not found, don't offer to start
+    }
+
+    // Ask if user wants to start Claude Code with this profile immediately
+    const shouldStart = claudeAvailable ?
+        await helper.ask(`Start Claude Code with ${name} now? (yes/no)`, 'no') :
+        'no';
+    const normalized = shouldStart.trim().toLowerCase();
+
     console.log('');
-    console.log('Saved environment variables:');
-    displayEnvVars(envVars);
-    console.log('');
-    console.log('This information has been saved to:');
-    console.log(`  ${PROFILES_FILE}`);
-    console.log(
-        'You can edit this file directly to further customize the profile:');
-    console.log(`  vim ${PROFILES_FILE}`);
-    console.log('Or run ccconfig edit to open it with your preferred editor');
+
+    // Create auto-execute output manager (RAII-style)
+    const output = (() => {
+      let executed = false;
+      return {
+        execute: () => {
+          if (!executed) {
+            console.log('');
+            console.log(`Configuration '${name}' summary:`);
+            console.log('');
+            console.log('Saved environment variables:');
+            displayEnvVars(envVars);
+            console.log('');
+            console.log(`To start Claude Code with this configuration:`);
+            console.log(`  ccconfig start ${name}`);
+            console.log('');
+            console.log('To update this configuration:');
+            console.log(`  ccconfig update ${name}`);
+            console.log('');
+            console.log('Configuration saved to:');
+            console.log(`  ${PROFILES_FILE}`);
+            executed = true;
+          }
+        }
+      };
+    })();
+
+    // Attempt to start Claude (if user chose yes), deferring output to exit
+    const shouldStartClaude = normalized === 'yes' || normalized === 'y';
+    if (shouldStartClaude) {
+      start(name, [], {onExit: output.execute});
+    } else {
+      // If not starting Claude, show output immediately
+      output.execute();
+    }
   } finally {
     helper.close();
   }
@@ -1263,25 +1304,6 @@ function current(showSecret = false) {
 }
 
 /**
- * Show configuration file path
- */
-function edit() {
-  if (!fs.existsSync(PROFILES_FILE)) {
-    console.error('Error: Configuration file does not exist');
-    console.error('Please add a configuration first: ccconfig add <name>');
-    process.exit(1);
-  }
-
-  const editor = process.env.EDITOR || process.env.VISUAL || 'vim';
-
-  console.log('Configuration file path:');
-  console.log(`  ${PROFILES_FILE}`);
-  console.log('');
-  console.log('Open it with your preferred editor, for example:');
-  console.log(`  ${editor} ${PROFILES_FILE}`);
-}
-
-/**
  * Switch/view mode
  */
 function mode(newMode) {
@@ -1376,9 +1398,10 @@ function env(format = 'bash') {
  * @param {Array} extraArgs - Additional arguments to pass to Claude
  * @param {Object} options - Options object
  * @param {boolean} options.safe - Whether to run in safe mode (default: false)
+ * @param {Function} options.onExit - Callback to execute before process exits
  */
 function startClaude(name, extraArgs = [], options = {}) {
-  const {safe = false} = options;
+  const {safe = false, onExit = null} = options;
   const commandName = safe ? 'safe-start' : 'start';
 
   if (!name) {
@@ -1531,6 +1554,11 @@ function startClaude(name, extraArgs = [], options = {}) {
     process.removeListener('SIGINT', signalHandler);
     process.removeListener('SIGTERM', signalHandler);
 
+    // Execute onExit callback before showing promotion message
+    if (typeof onExit === 'function') {
+      onExit();
+    }
+
     // Show project promotion message on exit
     console.log('');
     console.log('──────────────────────────────────────────');
@@ -1566,16 +1594,16 @@ function startClaude(name, extraArgs = [], options = {}) {
 /**
  * Start Claude Code with specified profile (auto-approve mode)
  */
-function start(name, extraArgs = []) {
-  return startClaude(name, extraArgs, {safe: false});
+function start(name, extraArgs = [], options = {}) {
+  return startClaude(name, extraArgs, {safe: false, ...options});
 }
 
 /**
  * Start Claude Code with specified profile (safe mode - requires permission
  * confirmation)
  */
-function safeStart(name, extraArgs = []) {
-  return startClaude(name, extraArgs, {safe: true});
+function safeStart(name, extraArgs = [], options = {}) {
+  return startClaude(name, extraArgs, {safe: true, ...options});
 }
 
 /**
@@ -1663,7 +1691,6 @@ _ccconfig() {
     'current:Display current configuration'
     'mode:View or switch mode'
     'env:Output environment variables'
-    'edit:Show configuration file location'
   )
 
   modes=('settings' 'env')
@@ -1724,7 +1751,6 @@ complete -c ccconfig -f -n "__fish_use_subcommand" -a "rm" -d "Remove configurat
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "current" -d "Display current configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "mode" -d "View or switch mode"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "env" -d "Output environment variables"
-complete -c ccconfig -f -n "__fish_use_subcommand" -a "edit" -d "Show configuration file location"
 
 # Get profile names dynamically
 function __ccconfig_profiles
@@ -1776,7 +1802,7 @@ function Get-CconfigProfiles {
 Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'edit', 'completion')
+    $commands = @('list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'completion')
     $modes = @('settings', 'env')
     $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
 
@@ -1889,8 +1915,6 @@ function help() {
       '  mode [settings|env]                       View or switch mode');
   console.log(
       '  env [format]                              Output environment variables (env mode)');
-  console.log(
-      '  edit                                      Show configuration file location');
   console.log(
       '  completion <bash|zsh|fish|pwsh>           Generate shell completion script');
   console.log('');
@@ -2011,9 +2035,6 @@ async function main() {
       break;
     case 'env':
       env(filteredArgs[1] || 'bash');
-      break;
-    case 'edit':
-      edit();
       break;
     case 'start':
       if (!filteredArgs[1]) {
