@@ -822,17 +822,20 @@ async function update(name) {
 /**
  * Remove configuration
  */
-function remove(name) {
+async function remove(name) {
   if (!name) {
     console.error('Error: Missing configuration name');
     console.error('Usage: ccconfig remove <name>');
     process.exit(1);
   }
 
+  // Check if terminal is interactive before proceeding
+  requireInteractive('removing configurations');
+
   // Validate configuration name
   validateConfigName(name);
 
-  const {profiles} = ensureProfileAvailable(name, {
+  const {profile, profiles} = ensureProfileAvailable(name, {
     allowEmptyEnv: true,
     onEmptyProfiles: () => {
       console.error('Error: Configuration file does not exist');
@@ -842,9 +845,45 @@ function remove(name) {
     }
   });
 
-  delete getProfilesMap(profiles)[name];
-  saveProfiles(profiles);
-  console.log(`✓ Configuration '${name}' removed`);
+  // Display profile information before removal
+  console.log('');
+  console.log('WARNING: PERMANENT DELETION');
+  console.log('═══════════════════════════════════════════════════════════');
+  console.log('');
+  console.log(`Configuration to be removed: ${name}`);
+  console.log('');
+  console.log('Profile details:');
+  if (profile.env && Object.keys(profile.env).length > 0) {
+    displayEnvVars(profile.env, true, '  ');
+  } else {
+    console.log('  (no environment variables configured)');
+  }
+  console.log('');
+  console.log('This action CANNOT be undone!');
+  console.log('All configuration data for this profile will be \x1b[1mpermanently deleted\x1b[0m.');
+  console.log('');
+
+  // Ask for confirmation
+  const helper = new ReadlineHelper();
+  try {
+    const confirmation = await helper.ask(
+        `Are you sure you want to remove '${name}'? (yes/no)`, 'no');
+    const normalized = confirmation.trim().toLowerCase();
+
+    if (normalized !== 'yes' && normalized !== 'y') {
+      console.log('');
+      console.log('Operation cancelled.');
+      return;
+    }
+
+    // Proceed with removal
+    delete getProfilesMap(profiles)[name];
+    saveProfiles(profiles);
+    console.log('');
+    console.log(`✓ Configuration '${name}' removed`);
+  } finally {
+    helper.close();
+  }
 }
 
 /**
@@ -2025,7 +2064,7 @@ async function main() {
       break;
     case 'remove':
     case 'rm':
-      remove(filteredArgs[1]);
+      await remove(filteredArgs[1]);
       break;
     case 'current':
       current(showSecret);

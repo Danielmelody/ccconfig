@@ -1,6 +1,6 @@
 {
   "name": "ccconfig",
-  "version": "1.4.3",
+  "version": "1.5.0",
   "description": "Cross-platform Claude Code configuration switching tool",
   "main": "ccconfig.js",
   "bin": {
