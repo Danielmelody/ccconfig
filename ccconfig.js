@@ -89,7 +89,7 @@ function ensureProfileAvailable(
 
 // All supported commands
 const COMMANDS = [
-  'list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm',
+  'list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm',
   'current', 'mode', 'env', 'completion'
 ];
 
@@ -814,6 +814,88 @@ async function update(name) {
     console.log('');
     console.log('Run the following command to activate:');
     console.log(`  ccconfig use ${name}`);
+  } finally {
+    helper.close();
+  }
+}
+
+/**
+ * Fork (copy) existing configuration
+ */
+async function fork(sourceName) {
+  initIfNeeded();
+  requireInteractive('forking configurations');
+
+  const helper = new ReadlineHelper();
+
+  try {
+    if (!sourceName) {
+      sourceName = await helper.ask('Please enter source configuration name to copy from');
+    }
+
+    validateConfigName(sourceName);
+
+    const {profile: sourceProfile} = ensureProfileAvailable(sourceName, {
+      allowEmptyEnv: true,
+      onEmptyProfiles: () => {
+        console.error('Error: Configuration file does not exist');
+      },
+      onMissingProfile: () => {
+        console.error(`Error: Configuration '${sourceName}' does not exist`);
+        console.error('');
+        console.error('Run ccconfig list to see available configurations');
+      }
+    });
+
+    const profiles = loadProfiles() || {profiles: {}};
+    const profilesMap = getProfilesMap(profiles);
+
+    // Ask for new name with validation loop (default to source name)
+    let newName = '';
+    while (true) {
+      newName = await helper.ask(
+          `Please enter new configuration name`, sourceName);
+
+      // Validate name format
+      try {
+        validateConfigName(newName);
+      } catch (error) {
+        // validateConfigName calls process.exit, but just in case
+        continue;
+      }
+
+      // Check if name already exists
+      if (profilesMap[newName]) {
+        console.error(`Error: Configuration '${newName}' already exists`);
+        console.error('Please choose a different name.');
+        console.error('');
+        continue;
+      }
+
+      // Name is valid and unique
+      break;
+    }
+
+    console.log(`Creating configuration '${newName}' from '${sourceName}'...`);
+    console.log('Press Enter to keep current value/default, or enter new value to update');
+    console.log('');
+
+    // Get environment variables (inherited from source)
+    const existingEnv = sourceProfile.env || {};
+    const envVars = await helper.askEnvVars(existingEnv);
+
+    // Now save everything at once
+    profilesMap[newName] = {env: envVars};
+    saveProfiles(profiles);
+
+    console.log(`✓ Configuration '${newName}' created from '${sourceName}'`);
+    console.log('');
+    console.log('Environment variables:');
+    displayEnvVars(envVars);
+    console.log('');
+    console.log('Run the following command to activate:');
+    console.log(`  ccconfig use ${newName}`);
+
   } finally {
     helper.close();
   }
@@ -1685,7 +1767,7 @@ _ccconfig_completions() {
       ;;
     2)
       case "\${prev}" in
-        use|start|safe-start|update|remove|rm)
+        use|start|safe-start|update|fork|remove|rm)
           COMPREPLY=( $(compgen -W "\${profiles}" -- \${cur}) )
           ;;
         mode)
@@ -1693,6 +1775,9 @@ _ccconfig_completions() {
           ;;
         env)
           COMPREPLY=( $(compgen -W "bash zsh fish sh powershell pwsh dotenv" -- \${cur}) )
+          ;;
+        completion)
+          COMPREPLY=( $(compgen -W "bash zsh fish powershell pwsh" -- \${cur}) )
           ;;
       esac
       ;;
@@ -1722,6 +1807,7 @@ _ccconfig() {
     'ls:List all configurations'
     'add:Add new configuration'
     'update:Update existing configuration'
+    'fork:Copy existing configuration and update'
     'use:Switch to specified configuration'
     'start:Start Claude Code (auto-approve mode)'
     'safe-start:Start Claude Code (safe mode, requires confirmation)'
@@ -1746,7 +1832,7 @@ _ccconfig() {
       ;;
     3)
       case $words[2] in
-        use|start|safe-start|update|remove|rm)
+        use|start|safe-start|update|fork|remove|rm)
           _describe 'profile' profiles
           ;;
         mode)
@@ -1754,6 +1840,11 @@ _ccconfig() {
           ;;
         env)
           _describe 'format' formats
+          ;;
+        completion)
+          local -a shells
+          shells=('bash' 'zsh' 'fish' 'powershell' 'pwsh')
+          _describe 'shell' shells
           ;;
       esac
       ;;
@@ -1782,6 +1873,7 @@ complete -c ccconfig -f -n "__fish_use_subcommand" -a "list" -d "List all config
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "ls" -d "List all configurations"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "add" -d "Add new configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "update" -d "Update existing configuration"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "fork" -d "Copy existing configuration and update"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "use" -d "Switch to specified configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "start" -d "Start Claude Code (auto-approve mode)"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "safe-start" -d "Start Claude Code (safe mode, requires confirmation)"
@@ -1798,14 +1890,17 @@ function __ccconfig_profiles
   end
 end
 
-# Profile name completion for use, start, safe-start, update, remove
-complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update remove rm" -a "(__ccconfig_profiles)"
+# Profile name completion for use, start, safe-start, update, fork, remove
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update fork remove rm" -a "(__ccconfig_profiles)"
 
 # Mode options
 complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
 
 # Env format options
 complete -c ccconfig -f -n "__fish_seen_subcommand_from env" -a "bash zsh fish sh powershell pwsh dotenv"
+
+# Completion shell options
+complete -c ccconfig -f -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell pwsh"
 
 # Flags for use command
 complete -c ccconfig -f -n "__fish_seen_subcommand_from use" -s p -l permanent -d "Write permanently to shell config"
@@ -1841,7 +1936,7 @@ function Get-CconfigProfiles {
 Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('list', 'ls', 'add', 'update', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'completion')
+    $commands = @('list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'completion')
     $modes = @('settings', 'env')
     $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
 
@@ -1863,7 +1958,7 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     # Second argument completions based on command
     if ($position -eq 2 -or ($position -eq 3 -and $wordToComplete)) {
         switch ($command) {
-            { $_ -in 'use', 'start', 'safe-start', 'update', 'remove', 'rm' } {
+            { $_ -in 'use', 'start', 'safe-start', 'update', 'fork', 'remove', 'rm' } {
                 Get-CconfigProfiles | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }
@@ -1940,6 +2035,8 @@ function help() {
       '  add [name]                                Add new configuration (interactive)');
   console.log(
       '  update [name]                             Update existing configuration (interactive)');
+  console.log(
+      '  fork [source-name]                        Copy existing configuration and update (interactive)');
   console.log(
       '  use <name> [-p|--permanent]               Switch to specified configuration');
   console.log(
@@ -2061,6 +2158,9 @@ async function main() {
       break;
     case 'update':
       await update(filteredArgs[1]);
+      break;
+    case 'fork':
+      await fork(filteredArgs[1]);
       break;
     case 'remove':
     case 'rm':
