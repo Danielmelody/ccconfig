@@ -264,6 +264,46 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 - Use `ccconfig start work` to launch Claude Code with the updated profile
 - Or use `ccconfig use work` to activate it in current shell
 
+### Copy Configuration (fork)
+
+If you need to create a new configuration based on an existing one, use the `fork` command:
+
+```bash
+# Fork a configuration interactively
+ccconfig fork work
+
+# The tool will:
+# 1. Ask for a new configuration name
+# 2. Copy all environment variables from the source
+# 3. Allow you to update values (press Enter to keep current value)
+```
+
+**Example:**
+```bash
+$ ccconfig fork work
+Please enter source configuration name to copy from: work
+Please enter new configuration name: work-dev
+Creating configuration 'work-dev' from 'work'...
+Press Enter to keep current value/default, or enter new value to update
+
+ANTHROPIC_BASE_URL [https://api.company.com]: https://dev-api.company.com
+ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <press Enter to keep>
+ANTHROPIC_API_KEY [sk-...]: <press Enter to keep>
+ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <press Enter to keep>
+
+✓ Configuration 'work-dev' created from 'work'
+Environment variables:
+  ANTHROPIC_BASE_URL=https://dev-api.company.com
+  ANTHROPIC_AUTH_TOKEN=sk-ant-api...
+  ANTHROPIC_API_KEY=sk-...
+  ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+
+Run the following command to activate:
+  ccconfig use work-dev
+```
+
+This is useful when you need similar configurations with slight variations (e.g., production vs development endpoints).
+
 ### Shell Completion
 
 ccconfig supports shell completion for commands, profile names, and options. This makes it easier to discover and use commands.

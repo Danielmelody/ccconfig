@@ -264,6 +264,46 @@ Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
 - 使用 `ccconfig start work` 以更新后的配置启动 Claude Code
 - 或使用 `ccconfig use work` 在当前 shell 中激活配置
 
+### 复制配置 (fork)
+
+如果您需要基于现有配置创建新配置，使用 `fork` 命令：
+
+```bash
+# 交互式复制配置
+ccconfig fork work
+
+# 工具会：
+# 1. 要求输入新配置名称
+# 2. 从源配置复制所有环境变量
+# 3. 允许您更新值（按 Enter 保持当前值）
+```
+
+**示例：**
+```bash
+$ ccconfig fork work
+Please enter source configuration name to copy from: work
+Please enter new configuration name: work-dev
+Creating configuration 'work-dev' from 'work'...
+Press Enter to keep current value/default, or enter new value to update
+
+ANTHROPIC_BASE_URL [https://api.company.com]: https://dev-api.company.com
+ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <按 Enter 保持不变>
+ANTHROPIC_API_KEY [sk-...]: <按 Enter 保持不变>
+ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <按 Enter 保持不变>
+
+✓ Configuration 'work-dev' created from 'work'
+Environment variables:
+  ANTHROPIC_BASE_URL=https://dev-api.company.com
+  ANTHROPIC_AUTH_TOKEN=sk-ant-api...
+  ANTHROPIC_API_KEY=sk-...
+  ANTHROPIC_MODEL=claude-sonnet-4-5-20250929
+
+Run the following command to activate:
+  ccconfig use work-dev
+```
+
+当您需要相似配置但略有差异时很有用（例如生产环境与开发环境端点）。
+
 ### Shell 自动补全
 
 ccconfig 支持命令、配置名称和选项的 shell 自动补全，让您更容易发现和使用命令。
