@@ -180,46 +180,61 @@ class ReadlineHelper {
 
   async ask(question, defaultValue = '', options = {}) {
     this.ensureInterface();
-    const {brackets = 'parentheses'} = options;
+    const {brackets = 'parentheses', prefill = false} = options;
     const left = brackets === 'square' ? '[' : '(';
     const right = brackets === 'square' ? ']' : ')';
-    const suffix = defaultValue ? ` ${left}${defaultValue}${right}` : '';
+    // Don't show value in brackets if it will be pre-filled
+    const suffix = (defaultValue && !prefill) ? ` ${left}${defaultValue}${right}` : '';
 
     return new Promise(resolve => {
       this.rl.question(`${question}${suffix}: `, answer => {
         const trimmed = answer.trim();
         resolve(trimmed || defaultValue);
       });
+      // Pre-fill input with default value if prefill option is enabled
+      if (prefill && defaultValue) {
+        this.rl.write(defaultValue);
+      }
     });
   }
 
   async askEnvVars(existingEnv = {}) {
+    const hasExisting = key => !!existingEnv[key];
+
     const baseUrl = await this.ask(
         'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
-        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com',
-        {brackets: existingEnv.ANTHROPIC_BASE_URL ? 'square' : 'parentheses'});
+        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com', {
+          brackets: hasExisting('ANTHROPIC_BASE_URL') ? 'square' : 'parentheses',
+          prefill: hasExisting('ANTHROPIC_BASE_URL')
+        });
 
     const authToken = await this.ask(
         'ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)',
         existingEnv.ANTHROPIC_AUTH_TOKEN || '', {
-          brackets: existingEnv.ANTHROPIC_AUTH_TOKEN ? 'square' : 'parentheses'
+          brackets: hasExisting('ANTHROPIC_AUTH_TOKEN') ? 'square' : 'parentheses',
+          prefill: hasExisting('ANTHROPIC_AUTH_TOKEN')
         });
 
     const apiKey = await this.ask(
         'ANTHROPIC_API_KEY (press Enter to keep current/set empty)',
-        existingEnv.ANTHROPIC_API_KEY || '',
-        {brackets: existingEnv.ANTHROPIC_API_KEY ? 'square' : 'parentheses'});
+        existingEnv.ANTHROPIC_API_KEY || '', {
+          brackets: hasExisting('ANTHROPIC_API_KEY') ? 'square' : 'parentheses',
+          prefill: hasExisting('ANTHROPIC_API_KEY')
+        });
 
     const model = await this.ask(
         'ANTHROPIC_MODEL (press Enter to skip/keep current)',
-        existingEnv.ANTHROPIC_MODEL || '',
-        {brackets: existingEnv.ANTHROPIC_MODEL ? 'square' : 'parentheses'});
+        existingEnv.ANTHROPIC_MODEL || '', {
+          brackets: hasExisting('ANTHROPIC_MODEL') ? 'square' : 'parentheses',
+          prefill: hasExisting('ANTHROPIC_MODEL')
+        });
 
     const smallFastModel = await this.ask(
         'ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)',
         existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '', {
-          brackets: existingEnv.ANTHROPIC_SMALL_FAST_MODEL ? 'square' :
-                                                             'parentheses'
+          brackets:
+              hasExisting('ANTHROPIC_SMALL_FAST_MODEL') ? 'square' : 'parentheses',
+          prefill: hasExisting('ANTHROPIC_SMALL_FAST_MODEL')
         });
 
     const envVars = {
