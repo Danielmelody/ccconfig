@@ -1,6 +1,6 @@
 {
   "name": "ccconfig",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "Cross-platform Claude Code configuration switching tool",
   "main": "ccconfig.js",
   "bin": {
@@ -19,5 +19,8 @@
   "license": "MIT",
   "engines": {
     "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
   }
 }

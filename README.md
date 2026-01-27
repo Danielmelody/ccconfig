@@ -38,6 +38,10 @@ ccconfig use personal --permanent  # or use -p for short
 npm install -g ccconfig
 ```
 
+**Dependencies:**
+- Node.js >= 18.0.0
+- `dotenv` package (automatically installed with npm)
+
 ### Method 1: Direct Start Mode (Recommended)
 
 The easiest way to use ccconfig - directly start Claude Code with a specific profile:
@@ -243,19 +247,20 @@ ccconfig update work
 # 1. Show current values as defaults
 # 2. Prompt for each field
 # 3. Press Enter to keep current value, or type new value to update
+#    (for ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY, press ESC twice to clear)
 ```
 
 **Example:**
 ```bash
 $ ccconfig update work
 Updating configuration 'work'
-Press Enter to keep the current value, or enter a new value to update
+Press Enter to keep current value/default, or enter new value to update
 
 ANTHROPIC_BASE_URL [https://api.company.com]: https://new-api.company.com
-ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <press Enter to keep>
-ANTHROPIC_API_KEY []: sk-new-key-123
-ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <press Enter to keep>
-Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
+ANTHROPIC_AUTH_TOKEN (press Enter to keep current; ESC twice to clear): <press Enter to keep>
+ANTHROPIC_API_KEY (press Enter to keep current; ESC twice to clear): sk-new-key-123
+ANTHROPIC_MODEL (press Enter to skip/keep current): <press Enter to keep>
+ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current): <press Enter to skip>
 
 ✓ Configuration 'work' updated
 ```
@@ -276,6 +281,7 @@ ccconfig fork work
 # 1. Ask for a new configuration name
 # 2. Copy all environment variables from the source
 # 3. Allow you to update values (press Enter to keep current value)
+#    (for ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY, press ESC twice to clear)
 ```
 
 **Example:**
@@ -287,9 +293,10 @@ Creating configuration 'work-dev' from 'work'...
 Press Enter to keep current value/default, or enter new value to update
 
 ANTHROPIC_BASE_URL [https://api.company.com]: https://dev-api.company.com
-ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <press Enter to keep>
-ANTHROPIC_API_KEY [sk-...]: <press Enter to keep>
-ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <press Enter to keep>
+ANTHROPIC_AUTH_TOKEN (press Enter to keep current; ESC twice to clear): <press Enter to keep>
+ANTHROPIC_API_KEY (press Enter to keep current; ESC twice to clear): <press Enter to keep>
+ANTHROPIC_MODEL (press Enter to skip/keep current): <press Enter to keep>
+ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current): <press Enter to keep>
 
 ✓ Configuration 'work-dev' created from 'work'
 Environment variables:

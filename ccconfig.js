@@ -5,6 +5,7 @@ const path = require('path');
 const os = require('os');
 const readline = require('readline');
 const {spawn, execSync} = require('child_process');
+const dotenv = require('dotenv');
 
 // Configuration file paths
 const CONFIG_DIR = path.join(os.homedir(), '.config', 'ccconfig');
@@ -26,11 +27,51 @@ const ENV_KEYS = {
   SMALL_FAST_MODEL: 'ANTHROPIC_SMALL_FAST_MODEL'
 };
 
+// Constants
+const CONSTANTS = {
+  MAX_NAME_LENGTH: 50,
+  CONFIG_NAME_REGEX: /^[a-zA-Z0-9_-]+$/,
+  DEFAULT_BASE_URL: 'https://api.anthropic.com',
+  MASK_LENGTH: 20,
+  MARKERS: {
+    start: '# >>> ccconfig >>>',
+    end: '# <<< ccconfig <<<'
+  }
+};
+
+// Error messages
+const ERRORS = {
+  NO_CONFIGURATIONS: 'Error: No configurations found',
+  CONFIG_NOT_FOUND: (name) => `Error: Configuration '${name}' does not exist`,
+  EMPTY_ENV: (name) => `Error: Configuration '${name}' has empty environment variables`,
+  INVALID_NAME: (name) => `Error: Invalid configuration name '${name}'`,
+  NAME_TOO_LONG: (length) => `Error: Configuration name too long (max ${CONSTANTS.MAX_NAME_LENGTH} characters). Current length: ${length}`,
+  NAME_EMPTY: 'Error: Configuration name cannot be empty',
+  CLAUDE_NOT_FOUND: 'Error: Claude Code CLI not found',
+  INVALID_MODE: (mode) => `Error: Invalid mode '${mode}'`
+};
+
+// Help messages
+const HELP = {
+  ADD_FIRST: 'Please add a configuration first: ccconfig add <name>',
+  RUN_LIST: 'Run ccconfig list to see available configurations',
+  USE_UPDATE: (name) => `Or use 'ccconfig update ${name}' to modify the existing configuration`
+};
+
 // Sensitive keys that should be masked
 const SENSITIVE_KEYS = [ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY];
 
+// Update version
+let PACKAGE_VERSION = '1.6.0';
+
 function getProfilesMap(profiles) {
-  return profiles && profiles.profiles ? profiles.profiles : {};
+  if (!profiles) {
+    return {};
+  }
+  if (!profiles.profiles) {
+    profiles.profiles = {};
+  }
+  return profiles.profiles;
 }
 
 function isProfilesEmpty(profiles) {
@@ -93,21 +134,6 @@ const COMMANDS = [
   'current', 'mode', 'env', 'completion'
 ];
 
-// ccconfig markers for shell config files
-const SHELL_MARKERS = {
-  start: '# >>> ccconfig >>>',
-  end: '# <<< ccconfig <<<'
-};
-
-let PACKAGE_VERSION = 'unknown';
-try {
-  const packageJson = require('./package.json');
-  if (packageJson && typeof packageJson.version === 'string') {
-    PACKAGE_VERSION = packageJson.version;
-  }
-} catch (_) {
-  // Keep default 'unknown' when package.json is unavailable
-}
 
 /**
  * Ensure directory exists with secure permissions
@@ -127,25 +153,39 @@ function ensureDir(dir) {
 
 /**
  * Utility: Mask sensitive value for display
+ * @param {string} key - Environment variable key
+ * @param {string|null|undefined} value - Value to mask
+ * @param {boolean} shouldMask - Whether to apply masking
+ * @returns {string} - Masked or original value
  */
 function maskValue(key, value, shouldMask = true) {
-  const v = String(value ?? '');
-  if (!v || v === '(not set)') return v;
-  if (!shouldMask || !SENSITIVE_KEYS.includes(key)) return v;
-  return v.length > 20 ? v.substring(0, 20) + '...' : v;
+  // Normalize input to string
+  const strValue = value == null ? '' : String(value);
+  if (!strValue || strValue === '(not set)') return strValue;
+  if (!shouldMask || !SENSITIVE_KEYS.includes(key)) return strValue;
+  return strValue.length > CONSTANTS.MASK_LENGTH
+    ? strValue.substring(0, CONSTANTS.MASK_LENGTH) + '...'
+    : strValue;
 }
 
 /**
  * Utility: Print environment variable value (with optional masking)
+ * @param {string} key - Environment variable key
+ * @param {string|null|undefined} value - Value to print
+ * @param {boolean} mask - Whether to mask sensitive values
  */
 function printEnvVar(key, value, mask = true) {
-  const v = String(value ?? '');
-  const displayValue = v ? maskValue(key, v, mask) : '(not set)';
+  const displayValue = value
+    ? maskValue(key, String(value), mask)
+    : '(not set)';
   console.log(`  ${key}: ${displayValue}`);
 }
 
 /**
  * Utility: Display environment variables with consistent formatting
+ * @param {Object} envVars - Environment variables object
+ * @param {boolean} mask - Whether to mask sensitive values
+ * @param {string} indent - Indentation string
  */
 function displayEnvVars(envVars, mask = true, indent = '  ') {
   const keys = [
@@ -155,11 +195,12 @@ function displayEnvVars(envVars, mask = true, indent = '  ') {
   for (const key of keys) {
     if (!(key in envVars)) continue;
     const value = envVars[key];
+    // Skip empty optional fields
     if (!value && key !== ENV_KEYS.BASE_URL && key !== ENV_KEYS.AUTH_TOKEN &&
         key !== ENV_KEYS.API_KEY)
       continue;
-    const displayValue = maskValue(key, value, mask);
-    console.log(`${indent}${key}: ${displayValue || '(not set)'}`);
+    const displayValue = maskValue(key, value, mask) || '(not set)';
+    console.log(`${indent}${key}: ${displayValue}`);
   }
 }
 
@@ -169,6 +210,9 @@ function displayEnvVars(envVars, mask = true, indent = '  ') {
 class ReadlineHelper {
   constructor() {
     this.rl = null;
+    this.escCount = 0;
+    this.keypressHandler = null;
+    this.clearedByEsc = false;
   }
 
   ensureInterface() {
@@ -178,18 +222,101 @@ class ReadlineHelper {
     }
   }
 
+  setupKeypressListener(onDoubleEsc, onEscClear) {
+    // Enable raw mode to capture keypress events
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      readline.emitKeypressEvents(process.stdin);
+      if (!process.stdin.isRaw) {
+        process.stdin.setRawMode(true);
+      }
+
+      this.escCount = 0;
+      this.keypressHandler = (str, key) => {
+        if (key && key.name === 'escape') {
+          this.escCount++;
+          if (this.escCount >= 2) {
+            this.escCount = 0;
+            this.clearedByEsc = true;
+            if (onEscClear) {
+              // Just clear the line, don't resolve
+              onEscClear();
+            } else if (onDoubleEsc) {
+              onDoubleEsc();
+            }
+          }
+        } else if (key && key.name !== 'return' && key.name !== 'enter') {
+          // Reset counter on any other key (except enter)
+          this.escCount = 0;
+          // Also reset clearedByEsc if user starts typing
+          this.clearedByEsc = false;
+        }
+      };
+      process.stdin.on('keypress', this.keypressHandler);
+    }
+  }
+
+  cleanupKeypressListener() {
+    if (this.keypressHandler && process.stdin) {
+      process.stdin.removeListener('keypress', this.keypressHandler);
+      this.keypressHandler = null;
+    }
+    // Restore normal mode
+    if (process.stdin.isTTY && process.stdin.setRawMode) {
+      process.stdin.setRawMode(false);
+    }
+    this.escCount = 0;
+    this.clearedByEsc = false;
+  }
+
   async ask(question, defaultValue = '', options = {}) {
     this.ensureInterface();
-    const {brackets = 'parentheses', prefill = false} = options;
+    const {
+      brackets = 'parentheses',
+      prefill = false,
+      allowEmpty = false,
+      clearInput = null,
+      allowEmptyOnPrefill = true
+    } = options;
     const left = brackets === 'square' ? '[' : '(';
     const right = brackets === 'square' ? ']' : ')';
     // Don't show value in brackets if it will be pre-filled
     const suffix = (defaultValue && !prefill) ? ` ${left}${defaultValue}${right}` : '';
 
+    // Add hint for double-ESC to clear when prefill is enabled
+    const escHint = prefill ? ' (press ESC twice to clear)' : '';
+
     return new Promise(resolve => {
-      this.rl.question(`${question}${suffix}: `, answer => {
+      // Setup keypress listener for double-ESC detection (only clear input, don't resolve)
+      if (prefill) {
+        this.setupKeypressListener(null, () => {
+          // Clear the current line (Ctrl+U) - user can then type new value
+          this.rl.write(null, {ctrl: true, name: 'u'});
+        });
+      }
+
+      this.rl.question(`${question}${escHint}${suffix}: `, answer => {
+        this.cleanupKeypressListener();
         const trimmed = answer.trim();
-        resolve(trimmed || defaultValue);
+        const shouldClear = clearInput &&
+            (trimmed === clearInput ||
+             (prefill && defaultValue && trimmed === `${defaultValue}${clearInput}`));
+        if (shouldClear) {
+          resolve('');
+        } else {
+          // If allowEmpty is true and answer is empty, return empty string
+          // For prefilled fields with allowEmptyOnPrefill:
+          //   - If user cleared via ESC (clearedByEsc is true), allow empty
+          //   - If user manually deleted all content (prefill had value, now empty), allow empty
+          // Otherwise, fall back to defaultValue if answer is empty
+          const manuallyCleared = prefill && defaultValue && trimmed === '';
+          const effectiveAllowEmpty = allowEmpty || 
+              ((this.clearedByEsc || manuallyCleared) && allowEmptyOnPrefill);
+          if (effectiveAllowEmpty && trimmed === '') {
+            resolve('');
+          } else {
+            resolve(trimmed || defaultValue);
+          }
+        }
       });
       // Pre-fill input with default value if prefill option is enabled
       if (prefill && defaultValue) {
@@ -203,38 +330,42 @@ class ReadlineHelper {
 
     const baseUrl = await this.ask(
         'ANTHROPIC_BASE_URL (press Enter to keep current/default)',
-        existingEnv.ANTHROPIC_BASE_URL || 'https://api.anthropic.com', {
+        existingEnv.ANTHROPIC_BASE_URL || CONSTANTS.DEFAULT_BASE_URL, {
           brackets: hasExisting('ANTHROPIC_BASE_URL') ? 'square' : 'parentheses',
           prefill: hasExisting('ANTHROPIC_BASE_URL')
         });
 
     const authToken = await this.ask(
-        'ANTHROPIC_AUTH_TOKEN (press Enter to keep current/set empty)',
+        'ANTHROPIC_AUTH_TOKEN (press Enter to keep current; ESC twice to clear)',
         existingEnv.ANTHROPIC_AUTH_TOKEN || '', {
           brackets: hasExisting('ANTHROPIC_AUTH_TOKEN') ? 'square' : 'parentheses',
-          prefill: hasExisting('ANTHROPIC_AUTH_TOKEN')
+          prefill: hasExisting('ANTHROPIC_AUTH_TOKEN'),
+          allowEmpty: true
         });
 
     const apiKey = await this.ask(
-        'ANTHROPIC_API_KEY (press Enter to keep current/set empty)',
+        'ANTHROPIC_API_KEY (press Enter to keep current; ESC twice to clear)',
         existingEnv.ANTHROPIC_API_KEY || '', {
           brackets: hasExisting('ANTHROPIC_API_KEY') ? 'square' : 'parentheses',
-          prefill: hasExisting('ANTHROPIC_API_KEY')
+          prefill: hasExisting('ANTHROPIC_API_KEY'),
+          allowEmpty: true
         });
 
     const model = await this.ask(
-        'ANTHROPIC_MODEL (press Enter to skip/keep current)',
+        'ANTHROPIC_MODEL (press Enter to keep current)',
         existingEnv.ANTHROPIC_MODEL || '', {
           brackets: hasExisting('ANTHROPIC_MODEL') ? 'square' : 'parentheses',
-          prefill: hasExisting('ANTHROPIC_MODEL')
+          prefill: hasExisting('ANTHROPIC_MODEL'),
+          allowEmptyOnPrefill: true
         });
 
     const smallFastModel = await this.ask(
-        'ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current)',
+        'ANTHROPIC_SMALL_FAST_MODEL (press Enter to keep current)',
         existingEnv.ANTHROPIC_SMALL_FAST_MODEL || '', {
           brackets:
               hasExisting('ANTHROPIC_SMALL_FAST_MODEL') ? 'square' : 'parentheses',
-          prefill: hasExisting('ANTHROPIC_SMALL_FAST_MODEL')
+          prefill: hasExisting('ANTHROPIC_SMALL_FAST_MODEL'),
+          allowEmptyOnPrefill: true
         });
 
     const envVars = {
@@ -243,8 +374,14 @@ class ReadlineHelper {
       [ENV_KEYS.API_KEY]: apiKey || ''
     };
 
-    if (model) envVars[ENV_KEYS.MODEL] = model;
-    if (smallFastModel) envVars[ENV_KEYS.SMALL_FAST_MODEL] = smallFastModel;
+    // Only add model fields if they have a non-empty value
+    // Empty string means "clear/delete the value", so we only add when truthy
+    if (model) {
+      envVars[ENV_KEYS.MODEL] = model;
+    }
+    if (smallFastModel) {
+      envVars[ENV_KEYS.SMALL_FAST_MODEL] = smallFastModel;
+    }
 
     return envVars;
   }
@@ -311,21 +448,21 @@ function displayEnvSection(envVars, showSecret) {
  * Validate configuration name
  * @param {string} name - Configuration name to validate
  * @param {boolean} allowEmpty - Whether to allow empty names (default: false)
- * @returns {boolean} - Returns true if valid, exits process if invalid
+ * @returns {void}
+ * @throws {never} Exits process if validation fails
  */
 function validateConfigName(name, allowEmpty = false) {
   if (!name || name.trim() === '') {
     if (allowEmpty) {
-      return true;
+      return;
     }
-    console.error('Error: Configuration name cannot be empty');
+    console.error(ERRORS.NAME_EMPTY);
     process.exit(1);
   }
 
   // Allow only alphanumeric characters, hyphens, and underscores
-  const CONFIG_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
-  if (!CONFIG_NAME_REGEX.test(name)) {
-    console.error(`Error: Invalid configuration name '${name}'`);
+  if (!CONSTANTS.CONFIG_NAME_REGEX.test(name)) {
+    console.error(ERRORS.INVALID_NAME(name));
     console.error('');
     console.error('Configuration names can only contain:');
     console.error('  • Letters (a-z, A-Z)');
@@ -342,15 +479,10 @@ function validateConfigName(name, allowEmpty = false) {
   }
 
   // Limit length to prevent issues
-  const MAX_NAME_LENGTH = 50;
-  if (name.length > MAX_NAME_LENGTH) {
-    console.error(`Error: Configuration name too long (max ${
-        MAX_NAME_LENGTH} characters)`);
-    console.error(`Current length: ${name.length}`);
+  if (name.length > CONSTANTS.MAX_NAME_LENGTH) {
+    console.error(ERRORS.NAME_TOO_LONG(name.length));
     process.exit(1);
   }
-
-  return true;
 }
 
 /**
@@ -474,18 +606,22 @@ function updateClaudeSettings(envVars) {
 
 /**
  * Write environment variable file (env mode)
+ * Uses dotenv-compatible format for proper handling of special characters
  */
 function writeEnvFile(envVars) {
   try {
     ensureDir(CONFIG_DIR);
     const lines = Object.entries(envVars).map(([key, value]) => {
-      // Escape special characters to prevent injection
-      const escapedValue = String(value ?? '')
-                               .replace(/\\/g, '\\\\')
-                               .replace(/\n/g, '\\n')
-                               .replace(/\r/g, '\\r')
-                               .replace(/\t/g, '\\t');
-      return `${key}=${escapedValue}`;
+      const strValue = String(value ?? '');
+      // Use dotenv-compatible escaping for special characters
+      // Wrap in quotes if value contains spaces, newlines, or special chars
+      const needsQuotes = /[\s'"#$&*;|<>?]/.test(strValue);
+      if (needsQuotes) {
+        // Escape double quotes and backslashes for quoted values
+        const escaped = strValue.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        return `${key}="${escaped}"`;
+      }
+      return `${key}=${strValue}`;
     });
     const content = lines.join('\n') + '\n';
     fs.writeFileSync(ENV_FILE, content, 'utf-8');
@@ -501,7 +637,7 @@ function writeEnvFile(envVars) {
 }
 
 /**
- * Read environment variable file
+ * Read environment variable file using dotenv for proper parsing
  */
 function readEnvFile() {
   try {
@@ -509,23 +645,9 @@ function readEnvFile() {
       return null;
     }
     const content = fs.readFileSync(ENV_FILE, 'utf-8');
-    const env = {};
-    content.split('\n').forEach(line => {
-      // Only accept valid environment variable names: starts with letter or
-      // underscore, followed by letters, numbers, or underscores
-      const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
-      if (match) {
-        // Unescape special characters
-        // IMPORTANT: Must unescape \\\\ first to avoid double-unescaping
-        const unescapedValue = match[2]
-                                   .replace(/\\\\/g, '\\')
-                                   .replace(/\\n/g, '\n')
-                                   .replace(/\\r/g, '\r')
-                                   .replace(/\\t/g, '\t');
-        env[match[1]] = unescapedValue;
-      }
-    });
-    return env;
+    // Use dotenv to parse the env file properly
+    const parsed = dotenv.parse(content);
+    return parsed;
   } catch (error) {
     return null;
   }
@@ -1108,16 +1230,6 @@ const ShellUtils = {
   }
 };
 
-// Legacy function wrappers for backward compatibility
-function escapePosix(value) {
-  return ShellUtils.escape.posix(value);
-}
-function escapeFish(value) {
-  return ShellUtils.escape.fish(value);
-}
-function escapePwsh(value) {
-  return ShellUtils.escape.pwsh(value);
-}
 
 /**
  * Detect shell type and config file path
@@ -1145,8 +1257,8 @@ async function writePermanentEnv(envVars) {
   }
 
   const {shell, configPath} = shellConfig;
-  const marker = SHELL_MARKERS.start;
-  const markerEnd = SHELL_MARKERS.end;
+  const marker = CONSTANTS.MARKERS.start;
+  const markerEnd = CONSTANTS.MARKERS.end;
 
   // Generate environment variable lines (real and masked)
   const maskedEnvVars = {};
@@ -1231,16 +1343,24 @@ async function writePermanentEnv(envVars) {
     }
 
     // Check if ccconfig block already exists
-    const hasBlock = content.includes(marker);
+    const startIdx = content.indexOf(marker);
 
-    // Update content
-    if (hasBlock) {
-      // Replace existing block
-      const regex = new RegExp(
-          `${marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${
-              markerEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`,
-          'g');
-      content = content.replace(regex, envBlock);
+    // Update content using string operations (safer than regex)
+    if (startIdx !== -1) {
+      // Find the end marker
+      const endIdx = content.indexOf(markerEnd, startIdx);
+      if (endIdx !== -1) {
+        // Replace existing block (include the newline after end marker if present)
+        const afterEnd = endIdx + markerEnd.length;
+        const endPos = content.charAt(afterEnd) === '\n' ? afterEnd + 1 : afterEnd;
+        content = content.substring(0, startIdx) + envBlock + content.substring(endPos);
+      } else {
+        // End marker not found, append new block
+        if (content && !content.endsWith('\n')) {
+          content += '\n';
+        }
+        content += '\n' + envBlock;
+      }
     } else {
       // Append new block
       if (content && !content.endsWith('\n')) {
@@ -1259,14 +1379,14 @@ async function writePermanentEnv(envVars) {
     let applyCommand = '';
     switch (shell) {
       case 'fish':
-        applyCommand = `source "${escapeFish(configPath)}"`;
+        applyCommand = `source "${ShellUtils.escape.fish(configPath)}"`;
         break;
       case 'bash':
       case 'zsh':
-        applyCommand = `source ${escapePosix(configPath)}`;
+        applyCommand = `source ${ShellUtils.escape.posix(configPath)}`;
         break;
       case 'powershell':
-        applyCommand = `. ${escapePwsh(configPath)}`;
+        applyCommand = `. ${ShellUtils.escape.pwsh(configPath)}`;
         break;
       default:
         applyCommand = `source ${configPath}`;
@@ -1672,7 +1792,7 @@ function startClaude(name, extraArgs = [], options = {}) {
     process.exit(code || 0);
   };
 
-  // Handle SIGINT (Ctrl+C) and SIGTERM
+  // Handle signals: SIGINT (Ctrl+C), SIGTERM, and SIGHUP
   const signalHandler = (signal) => {
     // Forward signal to child process
     if (claude && !claude.killed) {
@@ -1683,12 +1803,19 @@ function startClaude(name, extraArgs = [], options = {}) {
 
   process.on('SIGINT', signalHandler);
   process.on('SIGTERM', signalHandler);
+  // Handle SIGHUP (hang up signal, e.g., terminal closed)
+  if (process.platform !== 'win32') {
+    process.on('SIGHUP', signalHandler);
+  }
 
   // Handle process exit
   claude.on('close', (code) => {
     // Remove signal handlers to avoid duplicate handling
     process.removeListener('SIGINT', signalHandler);
     process.removeListener('SIGTERM', signalHandler);
+    if (process.platform !== 'win32') {
+      process.removeListener('SIGHUP', signalHandler);
+    }
 
     // Execute onExit callback before showing promotion message
     if (typeof onExit === 'function') {
@@ -1718,6 +1845,9 @@ function startClaude(name, extraArgs = [], options = {}) {
     // Remove signal handlers
     process.removeListener('SIGINT', signalHandler);
     process.removeListener('SIGTERM', signalHandler);
+    if (process.platform !== 'win32') {
+      process.removeListener('SIGHUP', signalHandler);
+    }
 
     console.error(`Error starting Claude Code: ${err.message}`);
     console.error('');

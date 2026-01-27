@@ -38,6 +38,10 @@ ccconfig use personal --permanent  # 或使用 -p 简写
 npm install -g ccconfig
 ```
 
+**依赖：**
+- Node.js >= 18.0.0
+- `dotenv` 包（npm 自动安装）
+
 ### 方式 1：直接启动模式（推荐）
 
 最简单的使用方式 - 直接使用指定配置启动 Claude Code：
@@ -243,19 +247,20 @@ ccconfig update work
 # 1. 显示当前值作为默认值
 # 2. 提示输入每个字段
 # 3. 按 Enter 保持当前值，或输入新值来更新
+#    （对 ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY 按 ESC 两次可清空）
 ```
 
 **示例：**
 ```bash
 $ ccconfig update work
 Updating configuration 'work'
-Press Enter to keep the current value, or enter a new value to update
+Press Enter to keep current value/default, or enter new value to update
 
 ANTHROPIC_BASE_URL [https://api.company.com]: https://new-api.company.com
-ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <按 Enter 保持不变>
-ANTHROPIC_API_KEY []: sk-new-key-123
-ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <按 Enter 保持不变>
-Do you want to set ANTHROPIC_SMALL_FAST_MODEL? (y/N) [n]:
+ANTHROPIC_AUTH_TOKEN (press Enter to keep current; ESC twice to clear): <按 Enter 保持不变>
+ANTHROPIC_API_KEY (press Enter to keep current; ESC twice to clear): sk-new-key-123
+ANTHROPIC_MODEL (press Enter to skip/keep current): <按 Enter 保持不变>
+ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current): <按 Enter 跳过>
 
 ✓ Configuration 'work' updated
 ```
@@ -276,6 +281,7 @@ ccconfig fork work
 # 1. 要求输入新配置名称
 # 2. 从源配置复制所有环境变量
 # 3. 允许您更新值（按 Enter 保持当前值）
+#    （对 ANTHROPIC_AUTH_TOKEN/ANTHROPIC_API_KEY 按 ESC 两次可清空）
 ```
 
 **示例：**
@@ -287,9 +293,10 @@ Creating configuration 'work-dev' from 'work'...
 Press Enter to keep current value/default, or enter new value to update
 
 ANTHROPIC_BASE_URL [https://api.company.com]: https://dev-api.company.com
-ANTHROPIC_AUTH_TOKEN [sk-ant-api...]: <按 Enter 保持不变>
-ANTHROPIC_API_KEY [sk-...]: <按 Enter 保持不变>
-ANTHROPIC_MODEL [claude-sonnet-4-5-20250929]: <按 Enter 保持不变>
+ANTHROPIC_AUTH_TOKEN (press Enter to keep current; ESC twice to clear): <按 Enter 保持不变>
+ANTHROPIC_API_KEY (press Enter to keep current; ESC twice to clear): <按 Enter 保持不变>
+ANTHROPIC_MODEL (press Enter to skip/keep current): <按 Enter 保持不变>
+ANTHROPIC_SMALL_FAST_MODEL (press Enter to skip/keep current): <按 Enter 保持不变>
 
 ✓ Configuration 'work-dev' created from 'work'
 Environment variables:
@@ -494,4 +501,3 @@ chmod 600 ~/.config/ccconfig/current.env
 ## 许可证
 
 MIT
-
