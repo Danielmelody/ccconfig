@@ -131,7 +131,7 @@ function ensureProfileAvailable(
 // All supported commands
 const COMMANDS = [
   'list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm',
-  'current', 'mode', 'env', 'completion', 'oneshot'
+  'current', 'mode', 'env', 'completion'
 ];
 
 
@@ -1873,62 +1873,6 @@ function safeStart(name, extraArgs = [], options = {}) {
 }
 
 /**
- * Run Claude Code non-interactively with a prompt and exit
- * @param {string} prompt - The prompt to send to Claude Code
- */
-function oneshot(prompt) {
-  if (!prompt) {
-    console.error('Error: Missing prompt');
-    console.error('Usage: ccconfig oneshot <prompt>');
-    process.exit(1);
-  }
-
-  // Check if claude binary exists
-  try {
-    const command =
-        process.platform === 'win32' ? 'where claude' : 'which claude';
-    execSync(command, {stdio: 'pipe'});
-  } catch (err) {
-    console.error(ERRORS.CLAUDE_NOT_FOUND);
-    console.error('');
-    console.error('Please make sure Claude Code CLI is installed:');
-    console.error('  npm install -g claude-code');
-    process.exit(1);
-  }
-
-  // Get currently active environment variables
-  const activeEnv = getActiveEnvVars();
-  const envVars = {...process.env};
-
-  if (activeEnv) {
-    for (const [key, value] of Object.entries(activeEnv)) {
-      if (value === undefined || value === null) continue;
-      envVars[key] = typeof value === 'string' ? value : String(value);
-    }
-  }
-
-  const claudeArgs = ['-p', prompt, '--output-format', 'text', '--dangerously-skip-permissions'];
-
-  const claude = spawn('claude', claudeArgs, {
-    stdio: ['ignore', 'inherit', 'inherit'],
-    env: envVars,
-  });
-
-  claude.on('close', (code) => {
-    process.exit(code || 0);
-  });
-
-  claude.on('error', (err) => {
-    if (err.code === 'ENOENT') {
-      console.error(ERRORS.CLAUDE_NOT_FOUND);
-    } else {
-      console.error(`Error starting Claude Code: ${err.message}`);
-    }
-    process.exit(1);
-  });
-}
-
-/**
  * Generate shell completion script
  */
 function generateCompletionScript(shell) {
@@ -1955,7 +1899,7 @@ _ccconfig_completions() {
       ;;
     2)
       case "\${prev}" in
-        use|start|safe-start|update|fork|remove|rm|oneshot)
+        use|start|safe-start|update|fork|remove|rm)
           COMPREPLY=( $(compgen -W "\${profiles}" -- \${cur}) )
           ;;
         mode)
@@ -2003,7 +1947,6 @@ _ccconfig() {
     'current:Display current configuration'
     'mode:View or switch mode'
     'env:Output environment variables'
-    'oneshot:Run Claude Code non-interactively with a prompt'
     'completion:Generate/Install shell completion script'
   )
 
@@ -2021,7 +1964,7 @@ _ccconfig() {
       ;;
     3)
       case $words[2] in
-        use|start|safe-start|update|fork|remove|rm|oneshot)
+        use|start|safe-start|update|fork|remove|rm)
           _describe 'profile' profiles
           ;;
         mode)
@@ -2070,7 +2013,6 @@ complete -c ccconfig -f -n "__fish_use_subcommand" -a "rm" -d "Remove configurat
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "current" -d "Display current configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "mode" -d "View or switch mode"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "env" -d "Output environment variables"
-complete -c ccconfig -f -n "__fish_use_subcommand" -a "oneshot" -d "Run Claude Code non-interactively with a prompt"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "completion" -d "Generate/Install shell completion script"
 
 # Get profile names dynamically
@@ -2081,7 +2023,7 @@ function __ccconfig_profiles
 end
 
 # Profile name completion for use, start, safe-start, update, fork, remove
-complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update fork remove rm oneshot" -a "(__ccconfig_profiles)"
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update fork remove rm" -a "(__ccconfig_profiles)"
 
 # Mode options
 complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
@@ -2125,7 +2067,7 @@ function Get-CconfigProfiles {
 Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'oneshot', 'completion')
+    $commands = @('list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'completion')
     $modes = @('settings', 'env')
     $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
 
@@ -2147,7 +2089,7 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     # Second argument completions based on command
     if ($position -eq 2 -or ($position -eq 3 -and $wordToComplete)) {
         switch ($command) {
-            { $_ -in 'use', 'start', 'safe-start', 'update', 'fork', 'remove', 'rm', 'oneshot' } {
+            { $_ -in 'use', 'start', 'safe-start', 'update', 'fork', 'remove', 'rm' } {
                 Get-CconfigProfiles | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }
@@ -2361,8 +2303,6 @@ function help() {
   console.log(
       '  env [format]                              Output environment variables (env mode)');
   console.log(
-      '  oneshot <prompt>                           Run Claude Code non-interactively with a prompt');
-  console.log(
       '  completion <bash|zsh|fish|pwsh|install>   Generate/Install shell completion script');
   console.log('');
   console.log('Flags:');
@@ -2503,9 +2443,6 @@ async function main() {
       }
       // Pass all arguments after the profile name to Claude
       safeStart(filteredArgs[1], filteredArgs.slice(2));
-      break;
-    case 'oneshot':
-      oneshot(filteredArgs.slice(1).join(' '));
       break;
     case 'completion':
       await completion(filteredArgs[1]);
