@@ -62,7 +62,7 @@ const HELP = {
 const SENSITIVE_KEYS = [ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY];
 
 // Update version
-let PACKAGE_VERSION = '1.7.0';
+let PACKAGE_VERSION = '1.8.0';
 
 function getProfilesMap(profiles) {
   if (!profiles) {
