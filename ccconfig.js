@@ -62,7 +62,7 @@ const HELP = {
 const SENSITIVE_KEYS = [ENV_KEYS.AUTH_TOKEN, ENV_KEYS.API_KEY];
 
 // Update version
-let PACKAGE_VERSION = '1.6.0';
+let PACKAGE_VERSION = '1.7.0';
 
 function getProfilesMap(profiles) {
   if (!profiles) {
@@ -131,7 +131,7 @@ function ensureProfileAvailable(
 // All supported commands
 const COMMANDS = [
   'list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm',
-  'current', 'mode', 'env', 'completion'
+  'current', 'mode', 'env', 'completion', 'oneshot'
 ];
 
 
@@ -1873,27 +1873,70 @@ function safeStart(name, extraArgs = [], options = {}) {
 }
 
 /**
- * Generate shell completion script
+ * Run Claude Code non-interactively with a prompt and exit
+ * @param {string} prompt - The prompt to send to Claude Code
  */
-function completion(shell) {
-  if (!shell) {
-    console.error('Error: Missing shell type');
-    console.error('Usage: ccconfig completion <bash|zsh|fish|powershell|pwsh>');
-    console.error('');
-    console.error('To install:');
-    console.error('  Bash:       ccconfig completion bash >> ~/.bashrc');
-    console.error('  Zsh:        ccconfig completion zsh >> ~/.zshrc');
-    console.error(
-        '  Fish:       ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish');
-    console.error('  PowerShell: ccconfig completion pwsh >> $PROFILE');
+function oneshot(prompt) {
+  if (!prompt) {
+    console.error('Error: Missing prompt');
+    console.error('Usage: ccconfig oneshot <prompt>');
     process.exit(1);
   }
 
+  // Check if claude binary exists
+  try {
+    const command =
+        process.platform === 'win32' ? 'where claude' : 'which claude';
+    execSync(command, {stdio: 'pipe'});
+  } catch (err) {
+    console.error(ERRORS.CLAUDE_NOT_FOUND);
+    console.error('');
+    console.error('Please make sure Claude Code CLI is installed:');
+    console.error('  npm install -g claude-code');
+    process.exit(1);
+  }
+
+  // Get currently active environment variables
+  const activeEnv = getActiveEnvVars();
+  const envVars = {...process.env};
+
+  if (activeEnv) {
+    for (const [key, value] of Object.entries(activeEnv)) {
+      if (value === undefined || value === null) continue;
+      envVars[key] = typeof value === 'string' ? value : String(value);
+    }
+  }
+
+  const claudeArgs = ['-p', prompt, '--output-format', 'text', '--dangerously-skip-permissions'];
+
+  const claude = spawn('claude', claudeArgs, {
+    stdio: ['ignore', 'inherit', 'inherit'],
+    env: envVars,
+  });
+
+  claude.on('close', (code) => {
+    process.exit(code || 0);
+  });
+
+  claude.on('error', (err) => {
+    if (err.code === 'ENOENT') {
+      console.error(ERRORS.CLAUDE_NOT_FOUND);
+    } else {
+      console.error(`Error starting Claude Code: ${err.message}`);
+    }
+    process.exit(1);
+  });
+}
+
+/**
+ * Generate shell completion script
+ */
+function generateCompletionScript(shell) {
   const commands = COMMANDS.join(' ');
 
   switch (shell) {
     case 'bash':
-      console.log(`# ccconfig bash completion
+      return `# ccconfig bash completion
 _ccconfig_completions() {
   local cur prev commands profiles
   COMPREPLY=()
@@ -1912,7 +1955,7 @@ _ccconfig_completions() {
       ;;
     2)
       case "\${prev}" in
-        use|start|safe-start|update|fork|remove|rm)
+        use|start|safe-start|update|fork|remove|rm|oneshot)
           COMPREPLY=( $(compgen -W "\${profiles}" -- \${cur}) )
           ;;
         mode)
@@ -1922,7 +1965,7 @@ _ccconfig_completions() {
           COMPREPLY=( $(compgen -W "bash zsh fish sh powershell pwsh dotenv" -- \${cur}) )
           ;;
         completion)
-          COMPREPLY=( $(compgen -W "bash zsh fish powershell pwsh" -- \${cur}) )
+          COMPREPLY=( $(compgen -W "bash zsh fish powershell pwsh install" -- \${cur}) )
           ;;
       esac
       ;;
@@ -1940,11 +1983,10 @@ _ccconfig_completions() {
 }
 
 complete -F _ccconfig_completions ccconfig
-`);
-      break;
+`;
 
     case 'zsh':
-      console.log(`# ccconfig zsh completion
+      return `# ccconfig zsh completion
 _ccconfig() {
   local -a commands profiles modes formats
   commands=(
@@ -1961,6 +2003,8 @@ _ccconfig() {
     'current:Display current configuration'
     'mode:View or switch mode'
     'env:Output environment variables'
+    'oneshot:Run Claude Code non-interactively with a prompt'
+    'completion:Generate/Install shell completion script'
   )
 
   modes=('settings' 'env')
@@ -1977,7 +2021,7 @@ _ccconfig() {
       ;;
     3)
       case $words[2] in
-        use|start|safe-start|update|fork|remove|rm)
+        use|start|safe-start|update|fork|remove|rm|oneshot)
           _describe 'profile' profiles
           ;;
         mode)
@@ -1987,9 +2031,9 @@ _ccconfig() {
           _describe 'format' formats
           ;;
         completion)
-          local -a shells
-          shells=('bash' 'zsh' 'fish' 'powershell' 'pwsh')
-          _describe 'shell' shells
+          local -a subcommands
+          subcommands=('bash' 'zsh' 'fish' 'powershell' 'pwsh' 'install')
+          _describe 'subcommand' subcommands
           ;;
       esac
       ;;
@@ -2007,11 +2051,10 @@ _ccconfig() {
 }
 
 compdef _ccconfig ccconfig
-`);
-      break;
+`;
 
     case 'fish':
-      console.log(`# ccconfig fish completion
+      return `# ccconfig fish completion
 
 # Commands
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "list" -d "List all configurations"
@@ -2027,6 +2070,8 @@ complete -c ccconfig -f -n "__fish_use_subcommand" -a "rm" -d "Remove configurat
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "current" -d "Display current configuration"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "mode" -d "View or switch mode"
 complete -c ccconfig -f -n "__fish_use_subcommand" -a "env" -d "Output environment variables"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "oneshot" -d "Run Claude Code non-interactively with a prompt"
+complete -c ccconfig -f -n "__fish_use_subcommand" -a "completion" -d "Generate/Install shell completion script"
 
 # Get profile names dynamically
 function __ccconfig_profiles
@@ -2036,7 +2081,7 @@ function __ccconfig_profiles
 end
 
 # Profile name completion for use, start, safe-start, update, fork, remove
-complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update fork remove rm" -a "(__ccconfig_profiles)"
+complete -c ccconfig -f -n "__fish_seen_subcommand_from use start safe-start update fork remove rm oneshot" -a "(__ccconfig_profiles)"
 
 # Mode options
 complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
@@ -2045,7 +2090,7 @@ complete -c ccconfig -f -n "__fish_seen_subcommand_from mode" -a "settings env"
 complete -c ccconfig -f -n "__fish_seen_subcommand_from env" -a "bash zsh fish sh powershell pwsh dotenv"
 
 # Completion shell options
-complete -c ccconfig -f -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell pwsh"
+complete -c ccconfig -f -n "__fish_seen_subcommand_from completion" -a "bash zsh fish powershell pwsh install"
 
 # Flags for use command
 complete -c ccconfig -f -n "__fish_seen_subcommand_from use" -s p -l permanent -d "Write permanently to shell config"
@@ -2056,12 +2101,11 @@ complete -c ccconfig -f -n "__fish_seen_subcommand_from current" -s s -l show-se
 # Global flags
 complete -c ccconfig -f -s h -l help -d "Display help information"
 complete -c ccconfig -f -s V -l version -d "Display version information"
-`);
-      break;
+`;
 
     case 'powershell':
     case 'pwsh':
-      console.log(`# ccconfig PowerShell completion
+      return `# ccconfig PowerShell completion
 
 # Get available profiles
 function Get-CconfigProfiles {
@@ -2081,7 +2125,7 @@ function Get-CconfigProfiles {
 Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
 
-    $commands = @('list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'completion')
+    $commands = @('list', 'ls', 'add', 'update', 'fork', 'use', 'start', 'safe-start', 'remove', 'rm', 'current', 'mode', 'env', 'oneshot', 'completion')
     $modes = @('settings', 'env')
     $formats = @('bash', 'zsh', 'fish', 'sh', 'powershell', 'pwsh', 'dotenv')
 
@@ -2103,7 +2147,7 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
     # Second argument completions based on command
     if ($position -eq 2 -or ($position -eq 3 -and $wordToComplete)) {
         switch ($command) {
-            { $_ -in 'use', 'start', 'safe-start', 'update', 'fork', 'remove', 'rm' } {
+            { $_ -in 'use', 'start', 'safe-start', 'update', 'fork', 'remove', 'rm', 'oneshot' } {
                 Get-CconfigProfiles | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }
@@ -2119,7 +2163,7 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
                 }
             }
             'completion' {
-                @('bash', 'zsh', 'fish', 'powershell', 'pwsh') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
+                @('bash', 'zsh', 'fish', 'powershell', 'pwsh', 'install') | Where-Object { $_ -like "$wordToComplete*" } | ForEach-Object {
                     [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)
                 }
             }
@@ -2140,13 +2184,133 @@ Register-ArgumentCompleter -Native -CommandName ccconfig -ScriptBlock {
         }
     }
 }
-`);
-      break;
-
+`;
     default:
-      console.error(`Error: Unsupported shell: ${shell}`);
-      console.error('Supported shells: bash, zsh, fish, powershell, pwsh');
-      process.exit(1);
+      return null;
+  }
+}
+
+/**
+ * Install completion script automatically
+ */
+async function installCompletion() {
+  const shellType = ShellUtils.detectType();
+  if (!shellType) {
+    console.error('Error: Unable to detect shell type');
+    console.error('Supported shells: bash, zsh, fish, powershell');
+    process.exit(1);
+  }
+
+  const script = generateCompletionScript(shellType);
+  if (!script) {
+    console.error(`Error: Completion generation not supported for ${shellType}`);
+    process.exit(1);
+  }
+
+  let targetFile;
+  let append = false;
+
+  if (shellType === 'fish') {
+    // Fish completions typically go into ~/.config/fish/completions/
+    targetFile = path.join(os.homedir(), '.config', 'fish', 'completions', 'ccconfig.fish');
+    append = false;
+  } else {
+    // Other shells: append to config file (bashrc, zshrc, profile.ps1)
+    targetFile = ShellUtils.getConfigPath(shellType);
+    append = true;
+  }
+
+  if (!targetFile) {
+    console.error(`Error: Could not determine config file for ${shellType}`);
+    process.exit(1);
+  }
+
+  console.log(`Installing completion for ${shellType}...`);
+  console.log(`Target: ${targetFile}`);
+
+  try {
+    ensureDir(path.dirname(targetFile));
+
+    if (append) {
+      const markerStart = '# >>> ccconfig completion >>>';
+      const markerEnd = '# <<< ccconfig completion <<<';
+      const wrappedScript = `\n${markerStart}\n${script.trim()}\n${markerEnd}\n`;
+
+      let content = '';
+      if (fs.existsSync(targetFile)) {
+        content = fs.readFileSync(targetFile, 'utf-8');
+      }
+
+      // Check if already exists/replace
+      const startIdx = content.indexOf(markerStart);
+
+      if (startIdx !== -1) {
+        // Replace existing block
+        const endIdx = content.indexOf(markerEnd, startIdx);
+        if (endIdx !== -1) {
+          const afterEnd = endIdx + markerEnd.length;
+          // Determine if there's a newline after the block that we should preserve or consume?
+          // Simplest is to just splice.
+          content = content.substring(0, startIdx) + wrappedScript.trim() + content.substring(afterEnd);
+        } else {
+          // End marker missing, just replace from start
+          content = content.substring(0, startIdx) + wrappedScript;
+        }
+      } else {
+        // Append
+        if (content && !content.endsWith('\n')) content += '\n';
+        content += wrappedScript;
+      }
+      fs.writeFileSync(targetFile, content, 'utf-8');
+
+    } else {
+      // Overwrite (Fish)
+      fs.writeFileSync(targetFile, script, 'utf-8');
+    }
+
+    console.log('✓ Completion installed successfully');
+    console.log('');
+    console.log('Please restart your shell to apply changes.');
+    console.log(`  Or run: source ${targetFile}`);
+
+  } catch (err) {
+    console.error(`Error installing completion: ${err.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Generate shell completion script
+ */
+async function completion(shell) {
+  if (shell === 'install') {
+    await installCompletion();
+    return;
+  }
+
+  if (!shell) {
+    console.error('Error: Missing shell type');
+    console.error('Usage: ccconfig completion <bash|zsh|fish|powershell|pwsh|install>');
+    console.error('');
+    console.error('To install automatically:');
+    console.error('  ccconfig completion install');
+    console.error('');
+    console.error('To install manually:');
+    console.error('  Bash:       ccconfig completion bash >> ~/.bashrc');
+    console.error('  Zsh:        ccconfig completion zsh >> ~/.zshrc');
+    console.error(
+        '  Fish:       ccconfig completion fish > ~/.config/fish/completions/ccconfig.fish');
+    console.error('  PowerShell: ccconfig completion pwsh >> $PROFILE');
+    process.exit(1);
+  }
+
+  const script = generateCompletionScript(shell);
+  if (script) {
+    console.log(script);
+  } else {
+    console.error(`Error: Unsupported shell: ${shell}`);
+    console.error('Supported shells: bash, zsh, fish, powershell, pwsh');
+    process.exit(1);
   }
 }
 
@@ -2197,7 +2361,9 @@ function help() {
   console.log(
       '  env [format]                              Output environment variables (env mode)');
   console.log(
-      '  completion <bash|zsh|fish|pwsh>           Generate shell completion script');
+      '  oneshot <prompt>                           Run Claude Code non-interactively with a prompt');
+  console.log(
+      '  completion <bash|zsh|fish|pwsh|install>   Generate/Install shell completion script');
   console.log('');
   console.log('Flags:');
   console.log(
@@ -2338,8 +2504,11 @@ async function main() {
       // Pass all arguments after the profile name to Claude
       safeStart(filteredArgs[1], filteredArgs.slice(2));
       break;
+    case 'oneshot':
+      oneshot(filteredArgs.slice(1).join(' '));
+      break;
     case 'completion':
-      completion(filteredArgs[1]);
+      await completion(filteredArgs[1]);
       break;
     default:
       if (!command) {

@@ -1,13 +1,14 @@
 {
   "name": "ccconfig",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Cross-platform Claude Code configuration switching tool",
   "main": "ccconfig.js",
   "bin": {
     "ccconfig": "ccconfig.js"
   },
   "scripts": {
-    "test": "node ccconfig.js --version"
+    "test": "node ccconfig.js --version",
+    "postinstall": "node ccconfig.js completion install || echo \"Completion installation skipped\""
   },
   "keywords": [
     "claude",
